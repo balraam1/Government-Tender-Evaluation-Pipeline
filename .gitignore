@@ -1,0 +1,30 @@
+# Python virtual environments
+venv/
+myenv/
+.venv/
+env/
+__pycache__/
+*.pyc
+
+# Local environment / secrets
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+
+# SQLite Databases
+*.db
+*.sqlite3
+
+# Uploads directory
+uploads/
+
+# Node modules (Frontend/dependencies)
+node_modules/
+dist/
+build/
+
+# OS files
+.DS_Store
+Thumbs.db

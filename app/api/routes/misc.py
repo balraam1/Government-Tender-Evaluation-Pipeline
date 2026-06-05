@@ -1,0 +1,136 @@
+"""
+Audit Trail, Vendor Management & Health Check
+"""
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from datetime import datetime
+
+from app.core.database import get_db
+from app.models import AuditLog, Vendor, Tender
+
+audit_router = APIRouter(prefix="/api/audit", tags=["Audit Trail"])
+vendor_router = APIRouter(prefix="/api/vendor", tags=["Vendor Management"])
+health_router = APIRouter(prefix="/api", tags=["Health"])
+
+
+# ─── Health ──────────────────────────────────────────────────────────────────
+
+@health_router.get("/health", summary="Health check")
+def health_check(db: Session = Depends(get_db)):
+    try:
+        db.execute(db.bind.text("SELECT 1") if hasattr(db.bind, 'text') else __import__('sqlalchemy').text("SELECT 1"))
+        db_status = "ok"
+    except Exception as e:
+        db_status = f"error: {e}"
+
+    return {
+        "status": "healthy",
+        "app": "MPSEDC GenAI Procurement Platform",
+        "version": "1.0.0",
+        "database": db_status,
+        "timestamp": datetime.utcnow().isoformat(),
+        "modules": [
+            "rfp_generation", "prebid_query", "document_processing",
+            "metadata_extraction", "pq_evaluation", "technical_evaluation",
+            "shortfall_detection", "financial_evaluation", "recommendation"
+        ]
+    }
+
+
+# ─── Audit ────────────────────────────────────────────────────────────────────
+
+@audit_router.get("/logs", summary="Get audit logs")
+def get_audit_logs(
+    tender_id: int = None, module: str = None,
+    skip: int = 0, limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    query = db.query(AuditLog)
+    if tender_id:
+        query = query.filter(AuditLog.tender_id == tender_id)
+    if module:
+        query = query.filter(AuditLog.module == module)
+    logs = query.order_by(AuditLog.created_at.desc()).offset(skip).limit(limit).all()
+    return [
+        {
+            "id": l.id,
+            "tender_id": l.tender_id,
+            "user_id": l.user_id,
+            "action": l.action,
+            "module": l.module,
+            "details": l.details,
+            "created_at": l.created_at,
+        }
+        for l in logs
+    ]
+
+
+@audit_router.get("/summary", summary="Audit summary dashboard")
+def audit_summary(db: Session = Depends(get_db)):
+    from sqlalchemy import func
+    total_tenders = db.query(Tender).count()
+    total_vendors = db.query(Vendor).count()
+    total_logs = db.query(AuditLog).count()
+    recent_actions = (
+        db.query(AuditLog.action, func.count(AuditLog.id).label("count"))
+        .group_by(AuditLog.action)
+        .order_by(func.count(AuditLog.id).desc())
+        .limit(10)
+        .all()
+    )
+    return {
+        "total_tenders": total_tenders,
+        "total_vendors": total_vendors,
+        "total_audit_events": total_logs,
+        "actions_summary": [{"action": a.action, "count": a.count} for a in recent_actions],
+        "generated_at": datetime.utcnow(),
+    }
+
+
+# ─── Vendor ───────────────────────────────────────────────────────────────────
+
+@vendor_router.post("/register", summary="Register a vendor")
+def register_vendor(payload: dict, db: Session = Depends(get_db)):
+    vendor = Vendor(
+        vendor_name=payload.get("vendor_name", "Unknown"),
+        gst_number=payload.get("gst_number"),
+        pan_number=payload.get("pan_number"),
+        email=payload.get("email"),
+        phone=payload.get("phone"),
+        address=payload.get("address"),
+        annual_turnover=payload.get("annual_turnover"),
+        years_of_experience=payload.get("years_of_experience"),
+        certifications=payload.get("certifications", []),
+    )
+    db.add(vendor)
+    db.commit()
+    db.refresh(vendor)
+    return {"vendor_id": vendor.id, "vendor_name": vendor.vendor_name, "created_at": vendor.created_at}
+
+
+@vendor_router.get("/list", summary="List all vendors")
+def list_vendors(skip: int = 0, limit: int = 20, db: Session = Depends(get_db)):
+    vendors = db.query(Vendor).offset(skip).limit(limit).all()
+    return [
+        {"id": v.id, "vendor_name": v.vendor_name, "gst": v.gst_number, "pan": v.pan_number, "created_at": v.created_at}
+        for v in vendors
+    ]
+
+
+@vendor_router.get("/{vendor_id}", summary="Get vendor details")
+def get_vendor(vendor_id: int, db: Session = Depends(get_db)):
+    from fastapi import HTTPException
+    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    return {
+        "id": vendor.id,
+        "vendor_name": vendor.vendor_name,
+        "gst_number": vendor.gst_number,
+        "pan_number": vendor.pan_number,
+        "email": vendor.email,
+        "annual_turnover": vendor.annual_turnover,
+        "years_of_experience": vendor.years_of_experience,
+        "certifications": vendor.certifications,
+        "created_at": vendor.created_at,
+    }

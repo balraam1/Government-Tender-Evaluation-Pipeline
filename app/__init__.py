@@ -1,0 +1,1 @@
+# MPSEDC GenAI Procurement Platform
