@@ -31,7 +31,7 @@ from app.api.routes.technical import router as technical_router
 from app.api.routes.evaluation import (
     shortfall_router, financial_router, recommendation_router
 )
-from app.api.routes.misc import audit_router, vendor_router, health_router
+from app.api.routes.misc import audit_router, vendor_router, health_router, dashboard_router
 
 # Logging setup
 logging.basicConfig(
@@ -97,6 +97,7 @@ RFP No: MPSEDC/COE/2026/682
     app.include_router(financial_router)
     app.include_router(recommendation_router)
     app.include_router(audit_router)
+    app.include_router(dashboard_router)
 
     @app.on_event("startup")
     async def startup():

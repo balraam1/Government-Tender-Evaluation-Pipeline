@@ -1,7 +1,7 @@
 import React from 'react';
 import { 
   Activity, FileText, MessageSquare, Upload, 
-  ShieldCheck, Award, DollarSign 
+  ShieldCheck, Award, DollarSign, Lock
 } from 'lucide-react';
 
 export const Sidebar = ({ 
@@ -9,13 +9,15 @@ export const Sidebar = ({
   setActiveModule
 }) => {
   const menuItems = [
-    { id: 'dashboard', label: 'Executive logs', icon: Activity },
-    { id: 'rfp', label: '1. RFP Authoring', icon: FileText },
-    { id: 'prebid', label: '2. Pre-Bid Queries', icon: MessageSquare },
-    { id: 'ocr', label: '3. OCR Pipeline', icon: Upload },
-    { id: 'pq', label: '4. Pre-Qualification', icon: ShieldCheck },
-    { id: 'tech', label: '5. Tech Evaluation', icon: Award },
-    { id: 'financial', label: '6. Financial Award', icon: DollarSign },
+    { id: 'dashboard', label: 'Dashboard', icon: Activity },
+    { id: 'rfp', label: 'RFP Authoring', icon: FileText },
+    { id: 'prebid', label: 'Pre-Bid Queries', icon: MessageSquare },
+    { id: 'ocr', label: 'OCR Pipeline', icon: Upload },
+    { id: 'pq', label: 'Pre-Qualification', icon: ShieldCheck },
+    { id: 'tech', label: 'Tech Evaluation', icon: Award },
+    { id: 'financial', label: 'Financial Award', icon: DollarSign },
+    { id: 'recommendation', label: 'Final Recommendation', icon: FileText },
+    { id: 'security-audit', label: 'Security Audit Trail', icon: Lock },
   ];
 
   const handleItemClick = (id) => {

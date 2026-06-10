@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Send, MessageSquare, AlertCircle, Eye, X } from 'lucide-react';
+import { Send, MessageSquare, AlertCircle, Eye, X, Plus, FileDown } from 'lucide-react';
+import html2pdf from 'html2pdf.js';
+import { marked } from 'marked';
 import api from '../services/api';
 import StreamText from './StreamText';
 import FlowConnector from './FlowConnector';
+import ActiveTenderBadge from './ActiveTenderBadge';
 
 export const PreBidWorkspace = ({ activeTenderId }) => {
   const [queries, setQueries] = useState([]);
@@ -12,12 +15,27 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
   const [analyzing, setAnalyzing] = useState(false);
   const [selectedQuery, setSelectedQuery] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [vendors, setVendors] = useState([]);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     if (activeTenderId) {
       loadQueries();
     }
+    loadVendors();
   }, [activeTenderId]);
+
+  async function loadVendors() {
+    try {
+      const data = await api.listVendors();
+      setVendors(data);
+      if (data && data.length > 0 && !vendorName) {
+        setVendorName(data[0].vendor_name || data[0].name);
+      }
+    } catch (err) {
+      console.error("Error loading vendors:", err);
+    }
+  }
 
   async function loadQueries() {
     setLoading(true);
@@ -56,7 +74,7 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
         isNew: true
       });
       setQueryText('');
-      setVendorName('');
+      // setVendorName(''); // Do not reset vendorName to empty string since it is a dropdown
       loadQueries();
     } catch (err) {
       alert(`Query Analysis Failed: ${err.message}`);
@@ -71,9 +89,71 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
     setDrawerOpen(true);
   };
 
+  async function handleDownloadQueryPDF() {
+    if (!queries || queries.length === 0) return;
+    setDownloading(true);
+    try {
+      const container = document.createElement('div');
+      container.style.padding = '30px';
+      container.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+      container.style.color = '#1e293b';
+
+      let queriesHtml = queries.map((q, i) => `
+        <div style="margin-bottom: 25px; padding-bottom: 20px; border-bottom: 1px solid #e2e8f0; break-inside: avoid;">
+          <div style="font-weight: 600; color: #0f172a; margin-bottom: 8px;">
+            Q${i + 1}: ${q.vendor_name || 'Vendor'}
+            <span style="color: #64748b; font-weight: normal; font-size: 12px; margin-left: 10px;">
+              ${new Date(q.created_at || Date.now()).toLocaleDateString()}
+            </span>
+          </div>
+          <div style="font-size: 14px; color: #334155; margin-bottom: 15px; padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
+            <strong>Query:</strong> ${q.query_text}
+          </div>
+          <div style="font-size: 14px; color: #334155;">
+            <strong>AI Analysis:</strong>
+            <div style="margin-top: 8px; line-height: 1.5;">
+              ${marked.parse(q.ai_analysis || 'No analysis available.')}
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+      container.innerHTML = `
+        <div style="margin-bottom: 25px; border-bottom: 2px solid #ddd; padding-bottom: 15px;">
+          <h1 style="font-size: 20px; color: #0f172a; margin-bottom: 8px;">Pre-Bid Query Registry & Analysis</h1>
+          <div style="font-size: 14px; color: #64748b;">
+            <strong>Tender Reference:</strong> ${activeTenderId || 'N/A'}<br/>
+            <strong>Total Queries:</strong> ${queries.length}
+          </div>
+        </div>
+        <div>
+          ${queriesHtml}
+        </div>
+      `;
+
+      const opt = {
+        margin:       10,
+        filename:     `${activeTenderId || 'Tender'}_PreBid_Queries.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2 },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      await html2pdf().set(opt).from(container).save();
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      alert("Failed to generate PDF");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
-    <div className="panel-grid" style={{ overflow: 'hidden', height: '100%' }}>
-      <div style={{ display: 'grid', gap: '20px', height: '100%' }} className="panel-grid-2">
+    <div className="panel-grid" style={{ overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* Wrapper starts from top — no spacer */}
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, paddingTop: '20px' }}>
+      <ActiveTenderBadge activeTenderId={activeTenderId} />
+      <div style={{ display: 'grid', gap: '20px', flex: 1 }} className="panel-grid-2">
         {/* Left Card: Input Form */}
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignSelf: 'center' }}>
           <h2 style={{ fontSize: '15px', fontWeight: '700', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px' }}>
@@ -89,15 +169,20 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               <div>
                 <label style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: '600' }}>Vendor / Bidder Name</label>
-                <input 
-                  type="text" 
+                <select 
                   required
-                  placeholder="e.g. Tata Consultancy Services"
                   className="glass-input" 
                   style={{ marginTop: '6px' }}
                   value={vendorName}
                   onChange={e => setVendorName(e.target.value)}
-                />
+                >
+                  <option value="" disabled>Select a vendor...</option>
+                  {vendors.map(v => (
+                    <option key={v.id} value={v.vendor_name || v.name}>
+                      {v.vendor_name || v.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -128,9 +213,22 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
 
         {/* Right Card: Table Registry List */}
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
-          <h2 style={{ fontSize: '15px', fontWeight: '700', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px' }}>
-            Query Registry Logs
-          </h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px' }}>
+            <h2 style={{ fontSize: '15px', fontWeight: '700' }}>
+              Query Registry Logs
+            </h2>
+            {queries.length > 0 && activeTenderId && (
+              <button 
+                className="btn-secondary" 
+                style={{ padding: '6px 12px', fontSize: '12px' }}
+                onClick={handleDownloadQueryPDF}
+                disabled={downloading}
+              >
+                <FileDown size={14} style={{ marginRight: '6px' }} />
+                {downloading ? 'Generating PDF...' : 'Download PDF'}
+              </button>
+            )}
+          </div>
 
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {queries.length > 0 ? (
@@ -173,6 +271,7 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
           </div>
         </div>
       </div>
+      </div>
 
       {/* Drawer Overlay */}
       <div 
@@ -183,15 +282,18 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
       {/* Slide-out Drawer Panel */}
       <div className={`side-drawer ${drawerOpen ? 'open' : ''}`}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--card-border)', paddingBottom: '14px' }}>
-          <div>
-            <span className="badge badge-info" style={{ fontSize: '9px' }}>AI Query Analysis</span>
-            <h3 style={{ fontSize: '15px', fontWeight: '700', marginTop: '4px' }}>
-              {analyzing ? 'Processing...' : selectedQuery?.vendor_name}
-            </h3>
+          <div style={{ flex: 1 }}>
+            <span className="badge badge-info" style={{ fontSize: '9px' }}>Vendor / Bidder Name</span>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+              <FlowConnector />
+              <div className="output-stream-card" style={{ flex: 1, padding: '10px', borderRadius: '6px', fontSize: '13px', fontWeight: '700' }}>
+                {analyzing ? 'Processing...' : selectedQuery?.vendor_name}
+              </div>
+            </div>
           </div>
           <button 
             onClick={() => setDrawerOpen(false)}
-            style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
+            style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', alignSelf: 'flex-start' }}
           >
             <X size={20} />
           </button>
@@ -207,17 +309,20 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
             selectedQuery && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                 <div>
-                  <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Vendor Query</label>
-                  <p style={{ fontSize: '12px', color: 'var(--text-primary)', background: 'var(--overlay-bg)', padding: '10px', borderRadius: '4px', marginTop: '4px', fontStyle: 'italic', borderLeft: '2px solid var(--text-muted)' }}>
-                    "{selectedQuery.query_text}"
-                  </p>
+                  <span className="badge badge-info" style={{ fontSize: '9px' }}>Vendor Query</span>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                    <FlowConnector />
+                    <div className="output-stream-card" style={{ flex: 1, padding: '10px', borderRadius: '6px', fontSize: '12px', fontStyle: 'italic', fontWeight: '700', lineHeight: '1.5' }}>
+                      "{selectedQuery.query_text}"
+                    </div>
+                  </div>
                 </div>
 
                 <div>
                   <span className="badge badge-info" style={{ fontSize: '9px' }}>Relevant RFP Clause</span>
                   <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
                     <FlowConnector />
-                    <div className="output-stream-card" style={{ padding: '10px', borderRadius: '6px', flex: 1, fontFamily: 'monospace', fontSize: '11px' }}>
+                    <div className="output-stream-card" style={{ padding: '10px', borderRadius: '6px', flex: 1, fontSize: '12px', lineHeight: '1.4' }}>
                       <StreamText text={selectedQuery.relevant_clause} speed={10} simulate={selectedQuery.isNew} />
                     </div>
                   </div>

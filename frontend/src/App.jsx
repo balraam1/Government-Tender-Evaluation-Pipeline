@@ -7,6 +7,8 @@ import DocumentWorkspace from './components/DocumentWorkspace';
 import PqWorkspace from './components/PqWorkspace';
 import TechnicalWorkspace from './components/TechnicalWorkspace';
 import FinancialWorkspace from './components/FinancialWorkspace';
+import RecommendationWorkspace from './components/RecommendationWorkspace';
+import SecurityAuditPage from './components/SecurityAuditPage';
 
 function App() {
   const [activeModule, setActiveModule] = useState('dashboard');
@@ -56,6 +58,14 @@ function App() {
         <FinancialWorkspace 
           activeTenderId={activeTenderId} 
         />
+      </div>
+      <div style={{ display: activeModule === 'recommendation' ? 'block' : 'none', height: '100%' }}>
+        <RecommendationWorkspace 
+          activeTenderId={activeTenderId} 
+        />
+      </div>
+      <div style={{ display: activeModule === 'security-audit' ? 'block' : 'none', height: '100%' }}>
+        <SecurityAuditPage />
       </div>
     </Layout>
   );

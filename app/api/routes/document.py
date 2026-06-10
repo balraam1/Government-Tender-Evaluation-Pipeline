@@ -3,7 +3,9 @@ Module 3: Document Upload + OCR
 Module 4: Tender Metadata Extraction
 POST /api/document/upload
 POST /api/document/extract
+GET  /api/document/history
 GET  /api/document/{doc_id}
+GET  /api/document/{doc_id}/download
 """
 import os
 import uuid
@@ -12,7 +14,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, UploadFile, Form, HTTPException
+from fastapi import APIRouter, Depends, File, UploadFile, Form, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -25,7 +28,28 @@ from app.services.ai_service import ai_service
 router = APIRouter(prefix="/api/document", tags=["Module 3 & 4 - Document Processing"])
 logger = logging.getLogger(__name__)
 
-os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+# Ensure upload directory exists (absolute path)
+UPLOAD_DIR = os.path.abspath(settings.UPLOAD_DIR)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def _resolve_file_path(stored_path: str) -> str | None:
+    """Resolve a stored path (potentially relative) to an absolute path that exists."""
+    if not stored_path:
+        return None
+    # Already absolute
+    if os.path.isabs(stored_path) and os.path.exists(stored_path):
+        return stored_path
+    # Relative to project root (cwd at startup time was project root)
+    abs_from_cwd = os.path.abspath(stored_path)
+    if os.path.exists(abs_from_cwd):
+        return abs_from_cwd
+    # Try resolving the filename against the absolute UPLOAD_DIR
+    filename = os.path.basename(stored_path)
+    abs_from_upload = os.path.join(UPLOAD_DIR, filename)
+    if os.path.exists(abs_from_upload):
+        return abs_from_upload
+    return None
 
 
 @router.post("/upload", summary="Upload document with OCR processing")
@@ -38,7 +62,7 @@ async def upload_document(
 ):
     """
     **Module 3: Document Upload & OCR**
-    
+
     Supports: PDF, DOC, DOCX
     - Extracts text via PaddleOCR (scanned) or pdfplumber (native)
     - Generates vector embeddings stored in Qdrant
@@ -50,9 +74,9 @@ async def upload_document(
     if ext not in ["pdf", "doc", "docx"]:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}. Allowed: PDF, DOC, DOCX")
 
-    # Save file
+    # Save file with ABSOLUTE path so download always works regardless of cwd
     unique_name = f"{uuid.uuid4().hex}_{filename}"
-    file_path = os.path.join(settings.UPLOAD_DIR, unique_name)
+    file_path = os.path.join(UPLOAD_DIR, unique_name)   # absolute
     content = await file.read()
 
     if len(content) > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
@@ -67,15 +91,27 @@ async def upload_document(
     ocr_result = ocr_service.extract_text(file_path, ext)
     extracted_text = ocr_result.get("text", "")
 
-    # AI Metadata extraction
-    metadata = await _extract_metadata_ai(extracted_text, document_type)
+    # AI Metadata extraction — hard 25s cap so upload never hangs
+    import asyncio
+    try:
+        metadata = await asyncio.wait_for(_extract_metadata_ai(extracted_text, document_type), timeout=25.0)
+    except asyncio.TimeoutError:
+        logger.warning("AI metadata extraction timed out — saving document without metadata")
+        metadata = {"extraction_status": "timeout"}
+
+    # Validate vendor_id — silently clear if vendor doesn't exist (optional field)
+    if vendor_id:
+        from app.models import Vendor
+        if not db.query(Vendor).filter(Vendor.id == vendor_id).first():
+            logger.warning(f"Vendor ID {vendor_id} not found — storing document without vendor link")
+            vendor_id = None
 
     # Store in DB
     doc = Document(
         vendor_id=vendor_id,
         tender_id=tender_id,
         file_name=filename,
-        file_path=file_path,
+        file_path=file_path,   # absolute path stored
         document_type=document_type,
         ocr_text=extracted_text,
         extracted_metadata=metadata,
@@ -114,14 +150,12 @@ async def upload_document(
     ))
     db.commit()
 
-    preview = extracted_text
-
     return {
         "document_id": doc.id,
         "file_name": filename,
         "document_type": document_type,
         "file_size_bytes": len(content),
-        "ocr_text_preview": preview,
+        "ocr_text_preview": extracted_text,
         "ocr_method": doc.ocr_method,
         "accuracy_estimate": doc.ocr_accuracy,
         "total_chars_extracted": len(extracted_text),
@@ -135,7 +169,7 @@ async def upload_document(
 async def extract_metadata(payload: dict, db: Session = Depends(get_db)):
     """
     **Module 4: Tender Metadata Extraction**
-    
+
     Extracts:
     - Tender Number, Name, Category, Department
     - Submission Date, Eligibility Criteria
@@ -156,27 +190,85 @@ async def extract_metadata(payload: dict, db: Session = Depends(get_db)):
     return {
         "document_id": doc.id,
         "file_name": doc.file_name,
+        "ocr_text_preview": doc.ocr_text,   # return full OCR text so frontend can display it
         **metadata,
         "extracted_at": datetime.utcnow(),
     }
 
 
-@router.get("/{doc_id}", summary="Get document details")
+@router.get("/history", summary="List OCR-processed documents, optionally filtered by tender")
+def list_document_history(
+    tender_id: int = Query(None, description="Filter by tender ID"),
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    """Returns uploaded documents sorted by newest first, filtered by tender when provided."""
+    query = db.query(Document)
+    if tender_id is not None:
+        query = query.filter(Document.tender_id == tender_id)
+    docs = query.order_by(Document.created_at.desc()).offset(skip).limit(limit).all()
+    return [
+        {
+            "id": d.id,
+            "file_name": d.file_name,
+            "document_type": d.document_type,
+            "vendor_id": d.vendor_id,
+            "tender_id": d.tender_id,
+            "ocr_method": d.ocr_method,
+            "ocr_accuracy": round((d.ocr_accuracy or 0) * 100, 1),
+            "file_size_kb": round((d.file_size or 0) / 1024, 1),
+            "vector_stored": bool(d.vector_stored),
+            "has_metadata": bool(d.extracted_metadata and any(
+                k not in ("extraction_status", "raw_extraction")
+                for k in (d.extracted_metadata or {})
+            )),
+            "created_at": d.created_at,
+        }
+        for d in docs
+    ]
+
+
+@router.get("/{doc_id}", summary="Get full document details including OCR text and metadata")
 def get_document(doc_id: int, db: Session = Depends(get_db)):
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return {
         "id": doc.id,
+        "document_id": doc.id,
         "file_name": doc.file_name,
         "document_type": doc.document_type,
         "ocr_method": doc.ocr_method,
         "ocr_accuracy": doc.ocr_accuracy,
+        "accuracy_estimate": doc.ocr_accuracy,
         "text_length": len(doc.ocr_text or ""),
+        "ocr_text_preview": doc.ocr_text or "",   # full OCR text for View
         "metadata": doc.extracted_metadata,
         "vector_stored": bool(doc.vector_stored),
         "created_at": doc.created_at,
     }
+
+
+@router.get("/{doc_id}/download", summary="Download the original uploaded file")
+def download_document(doc_id: int, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    resolved = _resolve_file_path(doc.file_path)
+    if not resolved:
+        raise HTTPException(
+            status_code=404,
+            detail=f"File not found on disk. Stored path: {doc.file_path}"
+        )
+
+    return FileResponse(
+        path=resolved,
+        filename=doc.file_name,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{doc.file_name}"'},
+    )
 
 
 async def _extract_metadata_ai(text: str, doc_type: str) -> dict:
@@ -189,7 +281,7 @@ async def _extract_metadata_ai(text: str, doc_type: str) -> dict:
 {text[:4000]}
 ---
 
-Return JSON:
+Return ONLY valid JSON (no markdown fences, no explanation):
 {{
   "tender_number": "e.g. MPSEDC/COE/2026/682 or null",
   "tender_name": "Full tender title or null",
@@ -211,4 +303,5 @@ Return JSON:
             return json.loads(response[start:end])
     except Exception:
         pass
-    return {"raw_extraction": response[:500], "extraction_status": "partial"}
+    # Store full raw response so the frontend's JSON-repair logic can try again
+    return {"raw_extraction": response, "extraction_status": "partial"}

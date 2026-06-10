@@ -66,7 +66,7 @@ class AIService:
             "contents": contents,
             "generationConfig": {"maxOutputTokens": max_tokens}
         }
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -76,13 +76,11 @@ class AIService:
         """Demo mock when no AI backend is available"""
         if "shortfall" in prompt.lower() or "clarification" in prompt.lower():
             return self._mock_shortfall_letter(prompt)
-        if "financial" in prompt.lower():
+        if "rfp" in prompt.lower() or "tender" in prompt.lower() or "draft" in prompt.lower():
+            return self._mock_rfp_content()
+        if "financial" in prompt.lower() and "report" in prompt.lower():
             return self._mock_financial_report(prompt)
         if "recommendation" in prompt.lower() or "award" in prompt.lower():
-            return self._mock_award_report(prompt)
-        if "rfp" in prompt.lower() or "tender" in prompt.lower():
-            return self._mock_rfp_content()
-        if "pq" in prompt.lower() or "qualification" in prompt.lower():
             return json.dumps({"status": "PASS", "remarks": "All PQ criteria met", "score": 85})
         if "technical" in prompt.lower():
             return json.dumps({"score": 78, "compliance": "HIGH", "remarks": "Technical bid largely compliant"})
@@ -165,38 +163,7 @@ Sincerely,
 Evaluation Committee, MPSEDC"""
 
     def _mock_rfp_content(self) -> str:
-        return """## NOTICE INVITING TENDER (NIT)
-
-**Scope of Work:**
-This tender covers supply, installation, commissioning and maintenance of the required solution as per technical specifications.
-
-**Eligibility Criteria:**
-1. The bidder shall be a legally registered entity in India with minimum 3 years of operation.
-2. Annual turnover of at least ₹50 Lakhs in the last financial year.
-3. At least one similar project of ₹25 Lakhs value in last 5 years.
-
-**Technical Specifications:**
-- Solution must be cloud-native and scalable
-- 99.5% uptime SLA during business hours
-- Response time ≤ 3 seconds for standard operations
-- ISO 27001 certified organization
-
-**SLA Requirements:**
-- Critical issues resolved within 4 hours
-- Major issues resolved within 8 hours
-- Minor issues resolved within 24 hours
-
-**Evaluation Criteria:**
-| Parameter | Weightage |
-|---|---|
-| Technical Capability | 60% |
-| Financial Proposal | 40% |
-
-**Deliverables:**
-1. Deployed solution within 30 days of Work Order
-2. Complete documentation package
-3. Training for all user groups
-4. Go-live acceptance sign-off"""
+        return "{}"
 
 
 ai_service = AIService()

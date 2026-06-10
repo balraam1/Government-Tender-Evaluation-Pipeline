@@ -29,6 +29,7 @@ export const api = {
   listTenders: () => request('/rfp/list'),
   getTender: (id) => request(`/rfp/${id}`),
   generateRFP: (data) => request('/rfp/generate', { method: 'POST', body: data }),
+  updateRFP: (id, data) => request(`/rfp/${id}`, { method: 'PUT', body: data }),
 
   // Pre-Bid Queries
   getPreBidQueries: (tenderId) => request(`/prebid/${tenderId}/queries`),
@@ -38,6 +39,8 @@ export const api = {
   uploadDocument: (formData) => request('/document/upload', { method: 'POST', body: formData }),
   extractDocumentMetadata: (docId) => request('/document/extract', { method: 'POST', body: { document_id: docId } }),
   getDocument: (id) => request(`/document/${id}`),
+  getDocumentHistory: (tenderId) => request(`/document/history${tenderId ? `?tender_id=${tenderId}` : ''}`),
+  getDocumentDownloadUrl: (id) => `${API_BASE}/document/${id}/download`,
 
   // Pre-Qualification
   evaluatePQ: (data) => request('/pq/evaluate', { method: 'POST', body: data }),
@@ -72,6 +75,9 @@ export const api = {
     return request(`/audit/logs${query}`);
   },
   getAuditSummary: () => request('/audit/summary'),
+
+  // Dashboard Charts
+  getDashboardStats: () => request('/dashboard/stats'),
 };
 
 export default api;

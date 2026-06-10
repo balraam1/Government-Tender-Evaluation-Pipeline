@@ -12,7 +12,7 @@ import json
 import logging
 
 from app.core.database import get_db
-from app.schemas import RFPGenerateRequest, RFPGenerateResponse, TenderResponse
+from app.schemas import RFPGenerateRequest, RFPGenerateResponse, TenderResponse, RFPUpdateRequest
 from app.models import Tender, TenderStatus, AuditLog
 from app.services.ai_service import ai_service
 
@@ -32,18 +32,26 @@ Category: {req.category}
 Department: {req.department}
 Description: {req.description}
 Estimated Budget: INR {req.budget or 'To be quoted'}
+Selection Method: {req.selection_method}
+Contract Type: {req.contract_type}
+EMD Amount: INR {req.emd_amount}
+PBG Percentage: {req.pbg_percentage}%
+Contract Duration: {req.contract_duration}
+Minimum Annual Turnover required: INR {req.min_turnover}
+Minimum Years of Experience required: {req.min_experience}
+Proposal Submission Deadline: {req.submission_deadline or 'TBD'}
+Pre-Bid Meeting Date: {req.pre_bid_date or 'TBD'}
 Additional Requirements: {req.additional_requirements or 'None'}
 
-Generate the following sections in JSON format:
-{{
-  "scope_of_work": "Detailed scope covering all deliverables and activities",
-  "eligibility_criteria": "PQ criteria including turnover, experience, certifications required",
-  "sla_terms": "SLA requirements with uptime, response time, resolution time",
-  "evaluation_criteria": "Technical and financial evaluation parameters with weightages",
-  "deliverables": "List of all deliverables with timelines",
-  "full_rfp": "Complete RFP document text"
-}}
+Generate the document in professional Markdown format.
+You must include the following sections with exactly these headings:
+## Scope of Work
+## Eligibility Criteria
+## Service Level Agreements
+## Evaluation Criteria
+## Deliverables & Timeline
 
+Do not output JSON. Output the pure, complete Markdown RFP document directly.
 Ensure compliance with MPSEDC standards and Government of Madhya Pradesh procurement guidelines."""
     return system, prompt
 
@@ -111,6 +119,10 @@ async def generate_rfp(req: RFPGenerateRequest, db: Session = Depends(get_db)):
         tender_id=tender.id,
         tender_number=tender_number,
         title=tender.title,
+        category=tender.category,
+        department=tender.department,
+        description=tender.description,
+        budget=tender.budget,
         scope_of_work=tender.scope_of_work,
         eligibility_criteria=tender.eligibility_criteria,
         sla_terms=tender.sla_terms,
@@ -151,33 +163,50 @@ def get_tender(tender_id: int, db: Session = Depends(get_db)):
     }
 
 
-def _parse_rfp_sections(ai_response: str, req: RFPGenerateRequest) -> dict:
-    """Parse AI response, fallback to structured defaults if JSON fails"""
-    try:
-        # Try to extract JSON from response
-        start = ai_response.find("{")
-        end = ai_response.rfind("}") + 1
-        if start >= 0 and end > start:
-            data = json.loads(ai_response[start:end])
-            return {
-                "scope_of_work": data.get("scope_of_work", _default_scope(req)),
-                "eligibility_criteria": data.get("eligibility_criteria", _default_eligibility()),
-                "sla_terms": data.get("sla_terms", _default_sla()),
-                "evaluation_criteria": data.get("evaluation_criteria", _default_eval_criteria()),
-                "deliverables": data.get("deliverables", _default_deliverables()),
-                "full_rfp": data.get("full_rfp", ai_response),
-            }
-    except Exception:
-        pass
+@router.put("/{tender_id}", summary="Update generated RFP document")
+def update_rfp(tender_id: int, req: RFPUpdateRequest, db: Session = Depends(get_db)):
+    tender = db.query(Tender).filter(Tender.id == tender_id).first()
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+        
+    tender.generated_rfp = req.full_rfp_document
     
-    # Fallback: use full AI response as RFP
+    # Audit log
+    log = AuditLog(
+        tender_id=tender.id,
+        user_id="system",
+        action="RFP_UPDATED",
+        module="rfp",
+        details={"tender_id": tender.id},
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(tender)
+    
+    return {"status": "success", "message": "RFP document updated successfully"}
+
+
+def _parse_rfp_sections(ai_response: str, req: RFPGenerateRequest) -> dict:
+    import re
+    
+    def extract_section(text: str, header: str) -> str:
+        pattern = rf"(?i)##\s*{header}\s*\n(.*?)(?=\n##\s|$)"
+        match = re.search(pattern, text, re.DOTALL)
+        return match.group(1).strip() if match else ""
+
+    scope = extract_section(ai_response, "Scope of Work") or _default_scope(req)
+    eligibility = extract_section(ai_response, "Eligibility Criteria") or _default_eligibility()
+    sla = extract_section(ai_response, "Service Level Agreements") or _default_sla()
+    eval_crit = extract_section(ai_response, "Evaluation Criteria") or _default_eval_criteria()
+    deliv = extract_section(ai_response, "Deliverables.*") or _default_deliverables()
+
     return {
-        "scope_of_work": _default_scope(req),
-        "eligibility_criteria": _default_eligibility(),
-        "sla_terms": _default_sla(),
-        "evaluation_criteria": _default_eval_criteria(),
-        "deliverables": _default_deliverables(),
-        "full_rfp": ai_response or _default_full_rfp(req),
+        "scope_of_work": scope,
+        "eligibility_criteria": eligibility,
+        "sla_terms": sla,
+        "evaluation_criteria": eval_crit,
+        "deliverables": deliv,
+        "full_rfp": ai_response,
     }
 
 

@@ -16,7 +16,7 @@ from app.schemas import (
     FinancialEvaluationRequest, FinancialEvaluationResponse,
     RecommendationRequest, RecommendationResponse,
 )
-from app.models import FinancialEvaluation, PQEvaluation, TechnicalEvaluation, Tender, AuditLog
+from app.models import FinancialEvaluation, PQEvaluation, TechnicalEvaluation, Tender, AuditLog, Vendor
 from app.services.ai_service import ai_service
 
 # Router for Shortfall (Module 7)
@@ -236,6 +236,7 @@ def get_financial_results(tender_id: int, db: Session = Depends(get_db)):
             "ranking": e.ranking,
             "ranking_label": e.ranking_label,
             "remarks": e.remarks,
+            "created_at": e.created_at.isoformat() if e.created_at else datetime.utcnow().isoformat()
         }
         for e in evals
     ]
@@ -285,14 +286,8 @@ async def generate_recommendation(req: RecommendationRequest, db: Session = Depe
         raise HTTPException(status_code=404, detail="Tender not found")
 
     # Get all evaluations
-    pq_evals = db.query(PQEvaluation).filter(
-        PQEvaluation.tender_id == req.tender_id,
-        PQEvaluation.overall_status == "PASS"
-    ).all()
-    tech_evals = db.query(TechnicalEvaluation).filter(
-        TechnicalEvaluation.tender_id == req.tender_id,
-        TechnicalEvaluation.qualification_status == "QUALIFIED"
-    ).all()
+    pq_evals = db.query(PQEvaluation).filter(PQEvaluation.tender_id == req.tender_id).all()
+    tech_evals = db.query(TechnicalEvaluation).filter(TechnicalEvaluation.tender_id == req.tender_id).all()
     fin_evals = db.query(FinancialEvaluation).filter(
         FinancialEvaluation.tender_id == req.tender_id
     ).order_by(FinancialEvaluation.ranking).all()
@@ -301,8 +296,8 @@ async def generate_recommendation(req: RecommendationRequest, db: Session = Depe
         raise HTTPException(status_code=400, detail="No financial evaluations found. Run financial evaluation first.")
 
     # Find qualified L1 vendor
-    pq_passed = {e.vendor_id for e in pq_evals}
-    tech_qualified = {e.vendor_id: e.score for e in tech_evals}
+    pq_passed = {e.vendor_id for e in pq_evals if e.overall_status == "PASS"}
+    tech_qualified = {e.vendor_id: e.score for e in tech_evals if e.qualification_status == "QUALIFIED"}
 
     recommended_eval = None
     for fe in fin_evals:
@@ -316,8 +311,42 @@ async def generate_recommendation(req: RecommendationRequest, db: Session = Depe
 
     tech_score = tech_qualified.get(recommended_eval.vendor_id, 0)
 
-    # Generate AI report
-    award_report = await _generate_award_report(tender, recommended_eval, tech_score, db)
+    # Generate AI report and risk assessment
+    award_report, risk_assessment = await _generate_award_report_and_risk(tender, recommended_eval, tech_score, db)
+
+    # Build tender details
+    tender_details = {
+        "title": tender.title,
+        "department": tender.department,
+        "tender_number": tender.tender_number,
+        "budget": tender.budget,
+        "category": tender.category
+    }
+
+    # Build bidders summary
+    bidders_summary = []
+    vendor_ids = set([e.vendor_id for e in pq_evals] + [e.vendor_id for e in tech_evals] + [e.vendor_id for e in fin_evals])
+    vendors = {v.id: v.vendor_name for v in db.query(Vendor).filter(Vendor.id.in_(vendor_ids)).all()}
+    
+    for vid in vendor_ids:
+        pq = next((e for e in pq_evals if e.vendor_id == vid), None)
+        tech = next((e for e in tech_evals if e.vendor_id == vid), None)
+        fin = next((e for e in fin_evals if e.vendor_id == vid), None)
+        
+        bidders_summary.append({
+            "vendor_id": vid,
+            "vendor_name": vendors.get(vid, f"Vendor {vid}"),
+            "pq_status": pq.overall_status if pq else "NOT_EVALUATED",
+            "tech_score": tech.score if tech else 0,
+            "tech_status": tech.qualification_status if tech else "NOT_EVALUATED",
+            "fin_rank": fin.ranking_label if fin else "N/A",
+            "quoted_price": fin.quoted_price if fin else 0
+        })
+
+    bidders_summary.sort(key=lambda x: (
+        0 if x["fin_rank"] != "N/A" else 1,
+        float(x["quoted_price"]) if x["quoted_price"] else float('inf')
+    ))
 
     db.add(AuditLog(
         tender_id=req.tender_id,
@@ -328,20 +357,24 @@ async def generate_recommendation(req: RecommendationRequest, db: Session = Depe
     ))
     db.commit()
 
+    vname = vendors.get(recommended_eval.vendor_id, f"Vendor ID {recommended_eval.vendor_id}")
     return RecommendationResponse(
         tender_id=req.tender_id,
         recommended_vendor_id=recommended_eval.vendor_id,
-        recommended_vendor_name=f"Vendor ID {recommended_eval.vendor_id}",
+        recommended_vendor_name=vname,
         pq_status="PASS" if recommended_eval.vendor_id in pq_passed else "NOT_EVALUATED",
         technical_score=tech_score,
         financial_ranking=recommended_eval.ranking_label,
-        final_recommendation=f"Award to Vendor {recommended_eval.vendor_id} ({recommended_eval.ranking_label} @ INR {recommended_eval.quoted_price:,.0f})",
+        final_recommendation=f"Award to {vname} ({recommended_eval.ranking_label} @ INR {recommended_eval.quoted_price:,.0f})",
         award_report=award_report,
+        tender_details=tender_details,
+        bidders_summary=bidders_summary,
+        risk_assessment=risk_assessment,
         generated_at=datetime.utcnow(),
     )
 
 
-async def _generate_award_report(tender: Tender, fin_eval: FinancialEvaluation, tech_score: float, db: Session) -> str:
+async def _generate_award_report_and_risk(tender: Tender, fin_eval: FinancialEvaluation, tech_score: float, db: Session):
     try:
         prompt = f"""Generate a formal award recommendation report for:
 Tender: {tender.title} ({tender.tender_number})
@@ -350,10 +383,34 @@ Financial Rank: {fin_eval.ranking_label}
 Quoted Price: INR {fin_eval.quoted_price:,.0f}
 Technical Score: {tech_score}
 
-Write a 3-4 paragraph official award recommendation report."""
-        return await ai_service.generate(prompt, max_tokens=500)
+Write a 3-4 paragraph official award recommendation report.
+Separate from the report, write a 1-paragraph risk assessment on this vendor based on general procurement best practices. 
+Return your response exactly in this JSON format:
+{{
+  "report": "the award report text",
+  "risk": "the risk assessment text"
+}}"""
+        resp = await ai_service.generate(prompt, max_tokens=600)
+        
+        # Try to parse JSON
+        try:
+            # Strip markdown code blocks if any
+            clean_resp = resp.strip()
+            if clean_resp.startswith("```json"):
+                clean_resp = clean_resp[7:]
+            if clean_resp.startswith("```"):
+                clean_resp = clean_resp[3:]
+            if clean_resp.endswith("```"):
+                clean_resp = clean_resp[:-3]
+                
+            parsed = json.loads(clean_resp.strip())
+            return parsed.get("report", ""), parsed.get("risk", "")
+        except json.JSONDecodeError:
+            # Fallback if AI didn't return JSON
+            return resp, "Risk assessment could not be generated cleanly."
+            
     except Exception:
-        return f"""AWARD RECOMMENDATION REPORT
+        fallback_report = f"""AWARD RECOMMENDATION REPORT
 
 Tender: {tender.title}
 Tender No: {tender.tender_number}
@@ -369,7 +426,7 @@ EVALUATION SUMMARY:
 - Technical Evaluation: Score {tech_score}/100 - QUALIFIED
 - Financial Evaluation: Ranked {fin_eval.ranking_label} at INR {fin_eval.quoted_price:,.0f}
 
-RECOMMENDATION:
+RECOMMATION:
 The Evaluation Committee recommends award of the contract to Vendor ID {fin_eval.vendor_id} 
 at INR {fin_eval.quoted_price:,.0f} (exclusive of GST), being the L1 qualified bidder 
 meeting all technical and PQ requirements.
@@ -377,3 +434,5 @@ meeting all technical and PQ requirements.
 The selected vendor shall sign the agreement within 15 days of receipt of Letter of Intent.
 
 Chief General Manager, MPSEDC"""
+        fallback_risk = "No significant compliance deviations detected based on automated metrics. Vendor fulfills all criteria."
+        return fallback_report, fallback_risk

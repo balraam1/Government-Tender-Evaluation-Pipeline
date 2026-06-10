@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, FileText, CheckCircle, Brain, Eye, List } from 'lucide-react';
+import { Upload, FileText, CheckCircle, Brain, Eye, List, Download, FileDown } from 'lucide-react';
+import html2pdf from 'html2pdf.js';
+import { marked } from 'marked';
 import api from '../services/api';
 import StreamText from './StreamText';
 import FlowConnector from './FlowConnector';
+import ActiveTenderBadge from './ActiveTenderBadge';
 function repairJson(jsonStr) {
   let inString = false;
   let escape = false;
@@ -165,6 +168,29 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
   const [extracting, setExtracting] = useState(false);
   const [uploadedDoc, setUploadedDoc] = useState(null);
   const [extractedMeta, setExtractedMeta] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  // Reload history whenever the active tender changes
+  useEffect(() => {
+    loadHistory();
+    // Clear current view when tenant switches
+    setUploadedDoc(null);
+    setExtractedMeta(null);
+  }, [activeTenderId]);
+
+  async function loadHistory() {
+    setHistoryLoading(true);
+    try {
+      const data = await api.getDocumentHistory(activeTenderId);
+      setHistory(data);
+    } catch (err) {
+      console.error('Error loading OCR history:', err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   async function handleFileChange(e) {
     if (e.target.files && e.target.files[0]) {
@@ -191,6 +217,7 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
       setUploadedDoc({ ...data, isNew: true });
       setExtractedMeta(processMetadata(data.metadata));
       setFile(null);
+      loadHistory(); // Refresh history after new upload
     } catch (err) {
       alert(`Upload/OCR Failed: ${err.message}`);
     } finally {
@@ -198,23 +225,129 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
     }
   }
 
-  async function handleExtractMetadata() {
-    if (!uploadedDoc?.document_id) return;
+
+
+  async function handleViewDocument(docId) {
     setExtracting(true);
     try {
-      const data = await api.extractDocumentMetadata(uploadedDoc.document_id);
-      setExtractedMeta(processMetadata(data));
+      const doc = await api.getDocument(docId);
+      // Ensure accuracy_estimate is set for the stats display
+      const normalised = {
+        ...doc,
+        document_id: doc.id,
+        accuracy_estimate: doc.accuracy_estimate ?? doc.ocr_accuracy ?? 0,
+        isNew: false,
+      };
+      setUploadedDoc(normalised);
+      // Try to parse stored metadata; fall back to null (right pane will show OCR text)
+      const parsed = processMetadata(doc.metadata);
+      setExtractedMeta(parsed || null);
     } catch (err) {
-      alert(`Metadata Extraction Failed: ${err.message}`);
+      alert(`Failed to load document: ${err.message}`);
     } finally {
       setExtracting(false);
     }
   }
 
+  function handleDownloadDocument(docId) {
+    // Opens the download endpoint directly – FileResponse on the backend serves the file
+    window.open(api.getDocumentDownloadUrl(docId), '_blank');
+  }
+
+  async function handleDownloadMetadataPDF() {
+    if (!uploadedDoc) return;
+    setDownloading(true);
+    try {
+      const container = document.createElement('div');
+      container.style.padding = '30px';
+      container.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+      container.style.color = '#1e293b';
+
+      const keysToExclude = [
+        'document_id', 'file_name', 'extracted_at', 'processed_at', 
+        'file_size_bytes', 'ocr_method', 'accuracy_estimate', 
+        'total_chars_extracted', 'vector_stored', 'raw_extraction', 
+        'extraction_status', 'document_text_summary'
+      ];
+      
+      const formatKey = (str) => {
+        return str.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+      };
+
+      let metaHtml = '';
+      if (extractedMeta) {
+        Object.entries(extractedMeta).forEach(([key, value]) => {
+          if (keysToExclude.includes(key)) return;
+          if (value === null || value === undefined || value === '') return;
+
+          let valHtml = '';
+          if (Array.isArray(value)) {
+            valHtml = `<ul style="margin: 5px 0 15px 20px; padding: 0;">${value.map(v => `<li style="margin-bottom: 4px;">${v}</li>`).join('')}</ul>`;
+          } else if (typeof value === 'object') {
+            valHtml = `<div style="margin: 5px 0 15px 0; padding: 10px; background: #f8fafc; border-radius: 4px; border: 1px solid #e2e8f0;">`;
+            Object.entries(value).forEach(([subKey, subVal]) => {
+              valHtml += `<div style="margin-bottom: 6px;"><strong>${formatKey(subKey)}:</strong> ${subVal}</div>`;
+            });
+            valHtml += `</div>`;
+          } else {
+            valHtml = `<div style="margin: 5px 0 15px 0;">${marked.parse(String(value))}</div>`;
+          }
+
+          metaHtml += `
+            <div style="margin-bottom: 10px;">
+              <div style="font-weight: bold; color: #0f172a; font-size: 14px;">${formatKey(key)}:</div>
+              <div style="font-size: 13px; color: #334155;">${valHtml}</div>
+            </div>
+          `;
+        });
+      }
+
+      const textSummary = extractedMeta?.document_text_summary || uploadedDoc.ocr_text_preview || '';
+      const textHtml = marked.parse(formatOcrText(textSummary));
+
+      container.innerHTML = `
+        <div style="margin-bottom: 20px; border-bottom: 2px solid #ddd; padding-bottom: 15px;">
+          <h1 style="font-size: 20px; color: #0f172a; margin-bottom: 10px;">Document Metadata Extract</h1>
+          <div style="font-size: 14px; color: #64748b;">
+            <div><strong>File:</strong> ${uploadedDoc.file_name || 'N/A'}</div>
+            <div><strong>Category:</strong> ${uploadedDoc.document_type || 'N/A'}</div>
+            <div><strong>Accuracy Estimate:</strong> ${((uploadedDoc.accuracy_estimate || uploadedDoc.ocr_accuracy || 0) * (uploadedDoc.accuracy_estimate <= 1 ? 100 : 1)).toFixed(0)}%</div>
+          </div>
+        </div>
+        <div style="margin-bottom: 20px;">
+          <h2 style="font-size: 16px; color: #0f172a; margin-bottom: 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">Structured Metadata</h2>
+          ${metaHtml || '<div style="color: #64748b; font-size: 13px;">No structured metadata extracted.</div>'}
+        </div>
+        <div>
+          <h2 style="font-size: 16px; color: #0f172a; margin-bottom: 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px;">Extracted Text Content</h2>
+          <div style="font-size: 13px; line-height: 1.5; color: #334155;">
+            ${textHtml || '<div style="color: #64748b; font-size: 13px;">No text content available.</div>'}
+          </div>
+        </div>
+      `;
+
+      const opt = {
+        margin:       10,
+        filename:     `${uploadedDoc.file_name || 'Document'}_Metadata.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2 },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      await html2pdf().set(opt).from(container).save();
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      alert("Failed to generate PDF");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div className="panel-grid panel-grid-2">
+      <ActiveTenderBadge activeTenderId={activeTenderId} />
       {/* Left Pane: Upload Form & Metadata Extractor */}
-      <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', alignSelf: 'center' }}>
+      <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
         <h2 style={{ fontSize: '16px', fontWeight: '600', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px' }}>
           Document Upload & OCR pipeline
         </h2>
@@ -302,49 +435,50 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
                 <CheckCircle size={16} color="var(--color-success)" />
                 <span style={{ fontSize: '13px', fontWeight: '600' }}>OCR Processing Complete</span>
               </div>
-              <span className="badge badge-info" style={{ fontSize: '9px' }}>{uploadedDoc.ocr_method}</span>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '12px', background: 'var(--overlay-bg)', border: '1px solid var(--card-border)', padding: '10px', borderRadius: '6px' }}>
-              <div>Chars Extracted: <strong>{uploadedDoc.total_chars_extracted}</strong></div>
+            <div style={{ display: 'flex', justifyContent: 'center', fontSize: '12px', background: 'var(--overlay-bg)', border: '1px solid var(--card-border)', padding: '10px', borderRadius: '6px' }}>
               <div>Accuracy: <strong>{(uploadedDoc.accuracy_estimate * 100).toFixed(0)}%</strong></div>
             </div>
 
-            {uploadedDoc.document_type === 'TENDER' && (
-              <button 
-                className="btn-secondary" 
-                style={{ alignSelf: 'flex-start', gap: '8px', background: 'rgba(139, 92, 246, 0.15)', borderColor: 'rgba(139, 92, 246, 0.3)' }}
-                onClick={handleExtractMetadata}
-                disabled={extracting}
-              >
-                <Brain size={16} color="var(--accent-violet)" />
-                {extracting ? 'Gemma3 Extracting...' : 'Extract Tender Metadata'}
-              </button>
-            )}
+
           </div>
         )}
       </div>
 
       {/* Right Pane: OCR Output / Extracted Metadata */}
       <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
-        <h2 style={{ fontSize: '16px', fontWeight: '600', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px' }}>
-          Extracted structured Metadata & Text
-        </h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px' }}>
+          <h2 style={{ fontSize: '16px', fontWeight: '600' }}>
+            Extracted structured Metadata & Text
+          </h2>
+          {uploadedDoc && !(extracting || uploading) && (
+            <button 
+              className="btn-secondary" 
+              style={{ padding: '6px 12px', fontSize: '12px' }}
+              onClick={handleDownloadMetadataPDF}
+              disabled={downloading}
+            >
+              <FileDown size={14} style={{ marginRight: '6px' }} />
+              {downloading ? 'Generating PDF...' : 'Download PDF'}
+            </button>
+          )}
+        </div>
 
-        {extracting && (
+        {(extracting || uploading) && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '12px' }}>
             <div className="terminal-cursor" style={{ width: '12px', height: '22px' }}></div>
             <div style={{ color: 'var(--text-secondary)' }}>AI Agent is parsing dates, budgets, and criteria clauses...</div>
           </div>
         )}
 
-        {!extracting && !uploadedDoc && (
+        {!(extracting || uploading) && !uploadedDoc && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', textAlign: 'center' }}>
             Upload a document on the left to see the OCR<br/>transcription and structural AI parsing.
           </div>
         )}
 
-        {!extracting && uploadedDoc && (() => {
+        {!(extracting || uploading) && uploadedDoc && (() => {
           const keysToExclude = [
             'document_id', 'file_name', 'extracted_at', 'processed_at', 
             'file_size_bytes', 'ocr_method', 'accuracy_estimate', 
@@ -438,6 +572,116 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
             </div>
           );
         })()}</div>
+
+      {/* ── OCR Processing History — full-width row ── */}
+      <div
+        className="glass-card"
+        style={{
+          gridColumn: '1 / -1',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '14px',
+          marginTop: '4px',
+          maxHeight: '260px',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px' }}>
+          <h2 style={{ fontSize: '15px', fontWeight: '700' }}>OCR Processing History</h2>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{history.length} document{history.length !== 1 ? 's' : ''} processed</span>
+        </div>
+
+        {historyLoading && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '80px', color: 'var(--text-muted)', fontSize: '12px' }}>
+            Loading history...
+          </div>
+        )}
+
+        {!historyLoading && history.length === 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '80px', color: 'var(--text-muted)', fontSize: '12px' }}>
+            No documents processed yet. Upload a document above to begin.
+          </div>
+        )}
+
+        {!historyLoading && history.length > 0 && (
+          <div style={{ overflowY: 'auto', flex: 1 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--card-border)', color: 'var(--text-muted)', textAlign: 'left' }}>
+                  <th style={{ padding: '6px 10px', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>#</th>
+                  <th style={{ padding: '6px 10px', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Document</th>
+                  <th style={{ padding: '6px 10px', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Category</th>
+                  <th style={{ padding: '6px 10px', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Vendor ID</th>
+
+                  <th style={{ padding: '6px 10px', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center' }}>Accuracy</th>
+                  <th style={{ padding: '6px 10px', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center' }}>Vector</th>
+                  <th style={{ padding: '6px 10px', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Processed At</th>
+                  <th style={{ padding: '6px 10px', fontWeight: '600', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((doc, idx) => (
+                  <tr
+                    key={doc.id}
+                    style={{
+                      borderBottom: '1px solid var(--card-border)',
+                      background: idx % 2 === 0 ? 'transparent' : 'var(--overlay-bg)',
+                      transition: 'background 0.15s',
+                    }}
+                  >
+                    <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{doc.id}</td>
+                    <td style={{ padding: '8px 10px', fontWeight: '600', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {doc.file_name}
+                    </td>
+                    <td style={{ padding: '8px 10px' }}>
+                      <span className="badge badge-info" style={{ fontSize: '9px', whiteSpace: 'nowrap' }}>{doc.document_type}</span>
+                    </td>
+                    <td style={{ padding: '8px 10px', color: doc.vendor_id ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                      {doc.vendor_id ?? '—'}
+                    </td>
+
+                    <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                      <span style={{
+                        fontWeight: '700',
+                        color: doc.ocr_accuracy >= 90 ? 'var(--color-success)' : doc.ocr_accuracy >= 70 ? 'var(--color-warning)' : 'var(--color-danger)'
+                      }}>
+                        {doc.ocr_accuracy}%
+                      </span>
+                    </td>
+                    <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                      {doc.vector_stored
+                        ? <span style={{ color: 'var(--color-success)', fontWeight: '700', fontSize: '13px' }}>✓</span>
+                        : <span style={{ color: 'var(--color-danger)', fontSize: '13px' }}>✗</span>
+                      }
+                    </td>
+                    <td style={{ padding: '8px 10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                      {doc.created_at ? new Date(doc.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}
+                    </td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
+                        <button 
+                          onClick={() => handleViewDocument(doc.id)}
+                          style={{ background: 'none', border: '1px solid var(--card-border)', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: 'var(--text-secondary)' }}
+                          title="View OCR & Metadata"
+                        >
+                          <Eye size={12} /> View
+                        </button>
+                        <button 
+                          onClick={() => handleDownloadDocument(doc.id)}
+                          style={{ background: 'none', border: '1px solid var(--card-border)', borderRadius: '4px', padding: '4px 6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: 'var(--text-secondary)' }}
+                          title="Download Document File"
+                        >
+                          <Download size={12} /> DL
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

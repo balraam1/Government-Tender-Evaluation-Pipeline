@@ -1,12 +1,12 @@
 """
-Audit Trail, Vendor Management & Health Check
+Audit Trail, Vendor Management, Health Check & Dashboard Stats
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.core.database import get_db
-from app.models import AuditLog, Vendor, Tender
+from app.models import AuditLog, Vendor, Tender, PQEvaluation, TechnicalEvaluation, FinancialEvaluation
 
 audit_router = APIRouter(prefix="/api/audit", tags=["Audit Trail"])
 vendor_router = APIRouter(prefix="/api/vendor", tags=["Vendor Management"])
@@ -133,4 +133,88 @@ def get_vendor(vendor_id: int, db: Session = Depends(get_db)):
         "years_of_experience": vendor.years_of_experience,
         "certifications": vendor.certifications,
         "created_at": vendor.created_at,
+    }
+
+
+# ─── Dashboard Stats ──────────────────────────────────────────────────────────
+
+dashboard_router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
+
+
+@dashboard_router.get("/stats", summary="Aggregated stats for dashboard charts")
+def dashboard_stats(db: Session = Depends(get_db)):
+    from sqlalchemy import func
+
+    # 1. Procurement Pipeline Funnel
+    total_vendors  = db.query(Vendor).count()
+    pq_passed      = db.query(PQEvaluation).filter(PQEvaluation.overall_status == "PASS").count()
+    tech_qualified = db.query(TechnicalEvaluation).filter(
+        TechnicalEvaluation.qualification_status == "QUALIFIED"
+    ).count()
+    fin_ranked = db.query(FinancialEvaluation).count()
+    l1_awarded = db.query(FinancialEvaluation).filter(FinancialEvaluation.ranking == 1).count()
+
+    pipeline_funnel = [
+        {"stage": "Registered Vendors", "count": total_vendors},
+        {"stage": "PQ Passed",          "count": pq_passed},
+        {"stage": "Tech Qualified",     "count": tech_qualified},
+        {"stage": "Fin. Evaluated",     "count": fin_ranked},
+        {"stage": "L1 Awarded",         "count": l1_awarded},
+    ]
+
+    # 2. Budget vs. Quoted Price
+    tenders = db.query(Tender).filter(Tender.budget.isnot(None)).limit(8).all()
+    budget_vs_quoted = []
+    for t in tenders:
+        l1 = db.query(FinancialEvaluation).filter(
+            FinancialEvaluation.tender_id == t.id,
+            FinancialEvaluation.ranking == 1
+        ).first()
+        budget_vs_quoted.append({
+            "tender_number": t.tender_number,
+            "title": t.title or "",
+            "budget": float(t.budget or 0),
+            "quoted": float(l1.quoted_price if l1 else 0),
+        })
+
+    # 3. Vendor Leaderboard
+    vendors = db.query(Vendor).limit(6).all()
+    leaderboard = []
+    for v in vendors:
+        pq  = db.query(PQEvaluation).filter(PQEvaluation.vendor_id == v.id)\
+                 .order_by(PQEvaluation.created_at.desc()).first()
+        tec = db.query(TechnicalEvaluation).filter(TechnicalEvaluation.vendor_id == v.id)\
+                 .order_by(TechnicalEvaluation.created_at.desc()).first()
+        fin = db.query(FinancialEvaluation).filter(FinancialEvaluation.vendor_id == v.id)\
+                 .order_by(FinancialEvaluation.created_at.desc()).first()
+        leaderboard.append({
+            "vendor_id":   v.id,
+            "vendor_name": v.vendor_name,
+            "pq_status":   pq.overall_status if pq else "NOT_EVALUATED",
+            "tech_score":  float(tec.score) if tec and tec.score is not None else None,
+            "fin_rank":    fin.ranking_label if fin else None,
+        })
+    leaderboard.sort(key=lambda x: (x["tech_score"] or -1), reverse=True)
+
+    # 4. Module Activity Heatmap (last 30 days)
+    since = datetime.utcnow() - timedelta(days=29)
+    logs  = db.query(
+        AuditLog.module,
+        func.date(AuditLog.created_at).label("day"),
+        func.count(AuditLog.id).label("count")
+    ).filter(AuditLog.created_at >= since).group_by(
+        AuditLog.module, func.date(AuditLog.created_at)
+    ).all()
+
+    heatmap = [
+        {"module": l.module, "day": str(l.day), "count": l.count}
+        for l in logs
+    ]
+
+    return {
+        "pipeline_funnel":  pipeline_funnel,
+        "budget_vs_quoted": budget_vs_quoted,
+        "leaderboard":      leaderboard,
+        "heatmap":          heatmap,
+        "generated_at":     datetime.utcnow().isoformat(),
     }

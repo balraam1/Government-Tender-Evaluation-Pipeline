@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Award, FileText, CheckCircle2, AlertTriangle, ShieldCheck, Mail, Send } from 'lucide-react';
+import { Award, FileText, CheckCircle2, AlertTriangle, ShieldCheck, Mail, Send, FileDown } from 'lucide-react';
+import html2pdf from 'html2pdf.js';
+import { marked } from 'marked';
 import api from '../services/api';
 import StreamText from './StreamText';
 import FlowConnector from './FlowConnector';
+import ActiveTenderBadge from './ActiveTenderBadge';
 
 export const TechnicalWorkspace = ({ activeTenderId }) => {
   const [vendors, setVendors] = useState([]);
@@ -10,6 +13,9 @@ export const TechnicalWorkspace = ({ activeTenderId }) => {
   const [bidText, setBidText] = useState('');
   const [evaluating, setEvaluating] = useState(false);
   const [latestEval, setLatestEval] = useState(null);
+  const [techResults, setTechResults] = useState([]);
+  const [showTechHistory, setShowTechHistory] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   // Shortfall states
   const [analyzingShortfall, setAnalyzingShortfall] = useState(false);
@@ -42,12 +48,29 @@ export const TechnicalWorkspace = ({ activeTenderId }) => {
     loadVendors();
   }, []);
 
+  useEffect(() => {
+    if (activeTenderId) {
+      loadTechResults();
+    } else {
+      setTechResults([]);
+    }
+  }, [activeTenderId]);
+
   async function loadVendors() {
     try {
       const data = await api.listVendors();
       setVendors(data);
     } catch (err) {
       console.error("Error loading vendors:", err);
+    }
+  }
+
+  async function loadTechResults() {
+    try {
+      const data = await api.getTechnicalResults(activeTenderId);
+      setTechResults(data);
+    } catch (err) {
+      console.error("Error loading tech results:", err);
     }
   }
 
@@ -66,10 +89,114 @@ export const TechnicalWorkspace = ({ activeTenderId }) => {
         bid_text: bidText || "Submitted technical bid for evaluation."
       });
       setLatestEval(result);
+      loadTechResults(); // Refresh history
     } catch (err) {
       alert(`Technical Evaluation Failed: ${err.message}`);
     } finally {
       setEvaluating(false);
+    }
+  }
+
+  async function handleDownloadTechPDF(evalData) {
+    if (!evalData) return;
+    setDownloading(evalData.evaluation_id);
+    try {
+      const container = document.createElement('div');
+      container.style.padding = '30px';
+      container.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+      container.style.color = '#1e293b';
+
+      const vendor = vendors.find(v => v.id === evalData.vendor_id);
+      const vName = vendor ? vendor.vendor_name : `Vendor ID: ${evalData.vendor_id}`;
+      
+      const isQualified = evalData.qualification_status === 'QUALIFIED';
+      const statusHtml = isQualified 
+        ? `<span style="color: #10b981; font-weight: bold;">QUALIFIED</span>` 
+        : `<span style="color: #ef4444; font-weight: bold;">FAILED</span>`;
+
+      let matrixRows = (evalData.compliance_matrix || []).map((row, idx) => {
+        let cColor = row.compliance === 'COMPLIANT' ? '#10b981' : row.compliance === 'PARTIAL' ? '#f59e0b' : '#ef4444';
+        return `
+          <tr style="border-bottom: 1px solid #e2e8f0;">
+            <td style="padding: 8px 4px; color: #64748b;">${idx + 1}</td>
+            <td style="padding: 8px 4px;">
+              <div style="font-weight: 500;">${row.parameter_name}</div>
+              <div style="font-size: 11px; color: #64748b; margin-top: 2px;">${row.remarks}</div>
+            </td>
+            <td style="padding: 8px 4px; text-align: center; font-weight: 600;">${row.scored}</td>
+            <td style="padding: 8px 4px; text-align: center; color: ${cColor}; font-weight: 600;">${row.compliance}</td>
+          </tr>
+        `;
+      }).join('');
+
+      let shortfallHtml = '';
+      if (evalData.shortfalls && evalData.shortfalls.length > 0) {
+        shortfallHtml = `
+          <div style="margin-top: 15px; padding: 15px; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px;">
+            <div style="color: #d97706; font-weight: bold; margin-bottom: 8px;">Shortfall Deficiencies Detected:</div>
+            <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #92400e;">
+              ${evalData.shortfalls.map(sf => `<li style="margin-bottom: 4px;">${sf}</li>`).join('')}
+            </ul>
+          </div>
+        `;
+      }
+
+      let resultsHtml = `
+      <div style="margin-bottom: 30px; padding-bottom: 25px; border-bottom: 1px solid #cbd5e1; break-inside: avoid;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <div style="font-weight: 600; color: #0f172a; font-size: 16px;">${vName}</div>
+          <div style="font-size: 14px;">Overall Status: ${statusHtml}</div>
+        </div>
+        
+        <div style="font-size: 13px; color: #475569; margin-bottom: 15px;">
+          <strong>Score:</strong> ${evalData.score} / ${evalData.max_score} (${evalData.percentage}%)
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; margin-bottom: 15px;">
+          <thead>
+            <tr style="border-bottom: 2px solid #cbd5e1; color: #475569;">
+              <th style="padding: 8px 4px; width: 5%;">S.No</th>
+              <th style="padding: 8px 4px; width: 65%;">Evaluation Parameter</th>
+              <th style="padding: 8px 4px; text-align: center; width: 10%;">Score</th>
+              <th style="padding: 8px 4px; text-align: center; width: 20%;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${matrixRows}
+          </tbody>
+        </table>
+        
+        ${shortfallHtml}
+      </div>
+    `;
+
+      container.innerHTML = `
+        <div style="margin-bottom: 25px; border-bottom: 2px solid #ddd; padding-bottom: 15px;">
+          <h1 style="font-size: 20px; color: #0f172a; margin-bottom: 8px;">Technical Evaluation Report</h1>
+          <div style="font-size: 14px; color: #64748b;">
+            <strong>Tender Reference:</strong> ${activeTenderId || 'N/A'}<br/>
+            <strong>Date Evaluated:</strong> ${new Date(evalData.created_at).toLocaleString()}
+          </div>
+        </div>
+        <div>
+          ${resultsHtml}
+        </div>
+      `;
+
+      const opt = {
+        margin:       10,
+        filename:     `${activeTenderId || 'Tender'}_${vName.replace(/\\s+/g, '_')}_Technical.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2 },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      await html2pdf().set(opt).from(container).save();
+    } catch (err) {
+      console.error("PDF generation failed:", err);
+      alert("Failed to generate PDF");
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -106,6 +233,7 @@ export const TechnicalWorkspace = ({ activeTenderId }) => {
 
   return (
     <div className="panel-grid panel-grid-2">
+      <ActiveTenderBadge activeTenderId={activeTenderId} />
       {/* Left Pane: Bid Input & Shortfall Toggles */}
       <div style={{ 
         display: 'flex', 
@@ -351,14 +479,168 @@ export const TechnicalWorkspace = ({ activeTenderId }) => {
                         <div style={{ textAlign: 'center', fontWeight: '700', fontSize: '13px', borderBottom: '1px solid var(--card-border)', paddingBottom: '8px', color: 'var(--text-primary)', letterSpacing: '0.05em' }}>
                           {firstLine}
                         </div>
-                        <StreamText text={bodyText} speed={8} />
+                        <div style={{ color: 'var(--color-success)', fontWeight: '500' }}>
+                          <StreamText text={bodyText} speed={8} />
+                        </div>
                       </div>
                     );
                   }
-                  return <StreamText text={text} speed={8} />;
+                  return <div style={{ color: 'var(--color-success)', fontWeight: '500' }}><StreamText text={text} speed={8} /></div>;
                 })()}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* History Button */}
+      <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'center', marginTop: '16px', marginBottom: '32px' }}>
+        <button 
+          className="btn-primary" 
+          onClick={() => setShowTechHistory(true)}
+          disabled={!activeTenderId || techResults.length === 0}
+          style={{ background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--card-border)', padding: '10px 24px' }}
+        >
+          <FileText size={16} style={{ marginRight: '8px' }} />
+          View Technical Evaluation History
+        </button>
+      </div>
+
+      {/* History Modal */}
+      {showTechHistory && (
+        <div 
+          style={{
+            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', 
+            backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9999, 
+            display: 'flex', justifyContent: 'center', alignItems: 'center',
+            backdropFilter: 'blur(5px)'
+          }}
+          onClick={() => setShowTechHistory(false)}
+        >
+          <div 
+            style={{
+              backgroundColor: 'var(--bg-secondary)', padding: '24px', borderRadius: '16px',
+              width: '90%', maxWidth: '1100px', maxHeight: '85vh', overflowY: 'auto',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)', border: '1px solid var(--card-border)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', borderBottom: '1px solid var(--card-border)', paddingBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <FileText size={22} style={{ color: 'var(--color-primary)' }} />
+                <h2 style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--text-primary)', margin: 0 }}>Technical Evaluation & Shortfall History</h2>
+              </div>
+              <button onClick={() => setShowTechHistory(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                <span style={{ fontSize: '24px', lineHeight: '1' }}>&times;</span>
+              </button>
+            </div>
+
+            {techResults.length === 0 ? (
+              <p style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '40px' }}>No Technical history found for this tender.</p>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(450px, 1fr))', gap: '24px', alignItems: 'start' }}>
+                {techResults.map(evalData => {
+                  const vendor = vendors.find(v => v.id === evalData.vendor_id);
+                  return (
+                    <div key={evalData.evaluation_id} style={{ 
+                      backgroundColor: 'rgba(59, 130, 246, 0.05)', // Light blue tint for Tech Eval
+                      border: '1px solid rgba(59, 130, 246, 0.2)',
+                      borderRadius: '12px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                    }}>
+                      <div style={{ borderBottom: '1px solid rgba(59, 130, 246, 0.15)', paddingBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ fontSize: '11px', color: 'var(--color-primary)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+                            Evaluated Vendor
+                          </div>
+                          <div style={{ fontWeight: 'bold', fontSize: '16px', color: 'var(--text-primary)' }}>
+                            {vendor ? vendor.vendor_name : `Vendor ID: ${evalData.vendor_id}`}
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                            Evaluated at: {new Date(evalData.created_at).toLocaleString()}
+                          </div>
+                        </div>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleDownloadTechPDF(evalData); }}
+                          disabled={downloading === evalData.evaluation_id}
+                          style={{ 
+                            background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', 
+                            color: 'var(--color-primary)', padding: '6px', borderRadius: '6px', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                          }}
+                          title="Download PDF"
+                        >
+                          <FileDown size={16} />
+                        </button>
+                      </div>
+                      
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', backgroundColor: 'rgba(0,0,0,0.15)', borderRadius: '8px' }}>
+                        <div>
+                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block' }}>Score: {evalData.score} / {evalData.max_score} ({evalData.percentage}%)</span>
+                          <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)' }}>Overall Qualification</span>
+                        </div>
+                        {evalData.qualification_status === 'QUALIFIED' ? (
+                          <span style={{ color: 'var(--color-success)', fontWeight: 'bold', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '4px' }}><ShieldCheck size={16} /> QUALIFIED</span>
+                        ) : (
+                          <span style={{ color: 'var(--color-danger)', fontWeight: 'bold', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '4px' }}><AlertTriangle size={16} /> FAILED</span>
+                        )}
+                      </div>
+
+                      {/* Mini Scorecard Table */}
+                      <div style={{ fontSize: '12px', backgroundColor: 'rgba(0,0,0,0.1)', padding: '12px', borderRadius: '8px' }}>
+                        <div style={{ fontWeight: '600', marginBottom: '8px', color: 'var(--text-secondary)' }}>Evaluation Reports Pane History</div>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid var(--overlay-border)', color: 'var(--text-muted)' }}>
+                              <th style={{ textAlign: 'left', paddingBottom: '4px' }}>Parameter</th>
+                              <th style={{ textAlign: 'center', paddingBottom: '4px' }}>Score</th>
+                              <th style={{ textAlign: 'center', paddingBottom: '4px' }}>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {evalData.compliance_matrix?.map((row, idx) => (
+                              <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                <td style={{ padding: '6px 0', color: 'var(--text-primary)' }}>{row.parameter_name}</td>
+                                <td style={{ padding: '6px 0', textAlign: 'center', fontWeight: '600' }}>{row.scored}</td>
+                                <td style={{ padding: '6px 0', textAlign: 'center', color: row.compliance === 'COMPLIANT' ? 'var(--color-success)' : row.compliance === 'PARTIAL' ? 'var(--color-warning)' : 'var(--color-danger)' }}>
+                                  {row.compliance === 'COMPLIANT' ? 'Qualified' : row.compliance === 'PARTIAL' ? 'Partial' : 'Fail'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Shortfall Clarification Letter */}
+                      <div style={{ fontSize: '12px' }}>
+                        <div style={{ fontWeight: '600', marginBottom: '6px', color: '#CA8A04' }}>Shortfall Deficiency Report & Clarification Letter</div>
+                        <div style={{ color: 'var(--color-success)', backgroundColor: 'rgba(0,0,0,0.15)', padding: '12px', borderRadius: '8px', lineHeight: '1.5', fontFamily: 'monospace', fontSize: '11px' }}>
+                          {evalData.shortfalls && evalData.shortfalls.length > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <div style={{ textAlign: 'center', fontWeight: '800', color: 'var(--text-primary)', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '6px', marginBottom: '4px' }}>
+                                CLARIFICATION / SHORTFALL SUBMISSION REQUEST
+                              </div>
+                              <span style={{ color: 'var(--text-primary)' }}>Dear Bidder,</span>
+                              <span>During the technical evaluation of your proposal, the MPSEDC Evaluation Committee identified certain deficiencies/shortfalls in your submission.</span>
+                              <span>You are requested to submit/clarify the following missing items within 48 hours to ensure compliance:</span>
+                              <ol style={{ margin: '4px 0', paddingLeft: '24px' }}>
+                                {evalData.shortfalls.map((sf, idx) => (
+                                  <li key={idx}>{sf}</li>
+                                ))}
+                              </ol>
+                              <span>Please submit the required documents through the portal or via email within 48 hours. Failure to comply may lead to rejection of your bid.</span>
+                              <span style={{ color: 'var(--text-primary)', marginTop: '8px' }}>Sincerely,<br/>Evaluation Committee, MPSEDC</span>
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--color-success)' }}>No shortfalls detected. Bid submission is fully compliant.</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

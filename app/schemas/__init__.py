@@ -12,6 +12,15 @@ class RFPGenerateRequest(BaseModel):
     department: str = Field(..., description="Issuing department")
     description: str = Field(..., description="Brief description of requirement")
     budget: Optional[float] = Field(None, description="Estimated budget in INR")
+    selection_method: Optional[str] = Field("QCBS", description="E.g., QCBS, LCS, Fixed Budget")
+    contract_type: Optional[str] = Field("Fixed Price", description="E.g., Fixed Price, Time & Materials, Rate Contract")
+    emd_amount: Optional[float] = Field(0.0, description="Earnest Money Deposit in INR")
+    pbg_percentage: Optional[float] = Field(0.0, description="Performance Bank Guarantee percentage")
+    contract_duration: Optional[str] = Field("12 Months", description="Expected duration of the contract")
+    min_turnover: Optional[float] = Field(0.0, description="Minimum Annual Turnover required in INR")
+    min_experience: Optional[int] = Field(0, description="Minimum years of experience required")
+    submission_deadline: Optional[str] = Field(None, description="Proposal Submission Deadline (ISO string)")
+    pre_bid_date: Optional[str] = Field(None, description="Pre-Bid Meeting Date (ISO string)")
     additional_requirements: Optional[str] = None
 
     class Config:
@@ -21,7 +30,16 @@ class RFPGenerateRequest(BaseModel):
                 "category": "Services",
                 "department": "MPSEDC - Department of Science & Technology",
                 "description": "Deployment of Generative AI enabled procurement solution for bid preparation and evaluation",
-                "budget": 2500000
+                "budget": 2500000,
+                "selection_method": "QCBS",
+                "contract_type": "Fixed Price",
+                "emd_amount": 50000,
+                "pbg_percentage": 5.0,
+                "contract_duration": "3 Years",
+                "min_turnover": 5000000,
+                "min_experience": 3,
+                "submission_deadline": "2026-07-01T15:00:00Z",
+                "pre_bid_date": "2026-06-20T11:00:00Z"
             }
         }
 
@@ -30,6 +48,10 @@ class RFPGenerateResponse(BaseModel):
     tender_id: int
     tender_number: str
     title: str
+    category: str
+    department: str
+    description: Optional[str] = None
+    budget: Optional[float] = None
     scope_of_work: str
     eligibility_criteria: str
     sla_terms: str
@@ -37,6 +59,10 @@ class RFPGenerateResponse(BaseModel):
     deliverables: str
     full_rfp_document: str
     generated_at: datetime
+
+
+class RFPUpdateRequest(BaseModel):
+    full_rfp_document: str
 
 
 class TenderResponse(BaseModel):
@@ -261,4 +287,7 @@ class RecommendationResponse(BaseModel):
     financial_ranking: str
     final_recommendation: str
     award_report: str
+    tender_details: Optional[Dict[str, Any]] = None
+    bidders_summary: Optional[List[Dict[str, Any]]] = None
+    risk_assessment: Optional[str] = None
     generated_at: datetime
