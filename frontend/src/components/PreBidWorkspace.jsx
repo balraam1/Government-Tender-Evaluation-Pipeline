@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Send, MessageSquare, AlertCircle, Eye, X, Plus, FileDown } from 'lucide-react';
+import { Send, MessageSquare, AlertCircle, Eye, X, Plus, FileDown, Loader2 } from 'lucide-react';
 import html2pdf from 'html2pdf.js';
 import { marked } from 'marked';
 import api from '../services/api';
 import StreamText from './StreamText';
 import FlowConnector from './FlowConnector';
 import ActiveTenderBadge from './ActiveTenderBadge';
+import { VendorRegistrationForm } from './PqWorkspace';
 
 export const PreBidWorkspace = ({ activeTenderId }) => {
   const [queries, setQueries] = useState([]);
@@ -93,56 +94,94 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
     if (!queries || queries.length === 0) return;
     setDownloading(true);
     try {
-      const container = document.createElement('div');
-      container.style.padding = '30px';
-      container.style.fontFamily = 'system-ui, -apple-system, sans-serif';
-      container.style.color = '#1e293b';
+      const result = await api.generatePreBidReport(activeTenderId);
+      const markdownReport = result.report;
+      const tender = result.tender || {};
 
-      let queriesHtml = queries.map((q, i) => `
-        <div style="margin-bottom: 25px; padding-bottom: 20px; border-bottom: 1px solid #e2e8f0; break-inside: avoid;">
-          <div style="font-weight: 600; color: #0f172a; margin-bottom: 8px;">
-            Q${i + 1}: ${q.vendor_name || 'Vendor'}
-            <span style="color: #64748b; font-weight: normal; font-size: 12px; margin-left: 10px;">
-              ${new Date(q.created_at || Date.now()).toLocaleDateString()}
-            </span>
-          </div>
-          <div style="font-size: 14px; color: #334155; margin-bottom: 15px; padding: 12px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
-            <strong>Query:</strong> ${q.query_text}
-          </div>
-          <div style="font-size: 14px; color: #334155;">
-            <strong>AI Analysis:</strong>
-            <div style="margin-top: 8px; line-height: 1.5;">
-              ${marked.parse(q.ai_analysis || 'No analysis available.')}
-            </div>
-          </div>
-        </div>
-      `).join('');
-
-      container.innerHTML = `
-        <div style="margin-bottom: 25px; border-bottom: 2px solid #ddd; padding-bottom: 15px;">
-          <h1 style="font-size: 20px; color: #0f172a; margin-bottom: 8px;">Pre-Bid Query Registry & Analysis</h1>
-          <div style="font-size: 14px; color: #64748b;">
-            <strong>Tender Reference:</strong> ${activeTenderId || 'N/A'}<br/>
-            <strong>Total Queries:</strong> ${queries.length}
-          </div>
-        </div>
-        <div>
-          ${queriesHtml}
+      const metadataHtml = `
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 25px; font-size: 13px;">
+          <table style="width: 100%; border: none; margin: 0; border-collapse: collapse;">
+            <tbody>
+              <tr><td style="padding: 6px; font-weight: 600; width: 140px; border: none; color: #64748b; text-transform: uppercase; font-size: 11px;">Tender Number:</td><td style="padding: 6px; border: none; font-weight: 700; font-family: monospace;">${tender.tender_number || 'N/A'}</td></tr>
+              <tr><td style="padding: 6px; font-weight: 600; border: none; color: #64748b; text-transform: uppercase; font-size: 11px;">Title:</td><td style="padding: 6px; border: none;">${tender.title || 'N/A'}</td></tr>
+              <tr><td style="padding: 6px; font-weight: 600; border: none; color: #64748b; text-transform: uppercase; font-size: 11px;">Category:</td><td style="padding: 6px; border: none;">${tender.category || 'N/A'}</td></tr>
+              <tr><td style="padding: 6px; font-weight: 600; border: none; color: #64748b; text-transform: uppercase; font-size: 11px;">Department:</td><td style="padding: 6px; border: none;">${tender.department || 'N/A'}</td></tr>
+              <tr><td style="padding: 6px; font-weight: 600; border: none; color: #64748b; text-transform: uppercase; font-size: 11px;">Status:</td><td style="padding: 6px; border: none; font-weight: 700; color: #0284c7;">${tender.status || 'N/A'}</td></tr>
+              <tr><td style="padding: 6px; font-weight: 600; border: none; color: #64748b; text-transform: uppercase; font-size: 11px;">Estimated Budget:</td><td style="padding: 6px; border: none; font-weight: 500; color: #16a34a;">${tender.budget ? 'INR ' + (tender.budget / 100000).toFixed(2) + ' Lakhs' : 'To be quoted'}</td></tr>
+              <tr><td style="padding: 6px; font-weight: 600; border: none; vertical-align: top; color: #64748b; text-transform: uppercase; font-size: 11px;">Description:</td><td style="padding: 6px; border: none;">${tender.description || 'N/A'}</td></tr>
+              <tr><td style="padding: 6px; font-weight: 600; border: none; color: #64748b; text-transform: uppercase; font-size: 11px;">Created At:</td><td style="padding: 6px; border: none;">${tender.created_at ? new Date(tender.created_at).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' }) : 'N/A'}</td></tr>
+            </tbody>
+          </table>
         </div>
       `;
 
-      const opt = {
-        margin:       10,
-        filename:     `${activeTenderId || 'Tender'}_PreBid_Queries.pdf`,
-        image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2 },
-        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-      };
+      const container = document.createElement('div');
+      container.innerHTML = `
+        <html>
+        <head>
+        <title>Tender_${activeTenderId || 'N/A'}_PreBid_Report</title>
+        <style>
+          body { font-family: system-ui, -apple-system, sans-serif; color: #1e293b; line-height: 1.6; font-size: 13px; padding: 20px; }
+          h1, h2, h3 { color: #0f172a; margin-top: 1em; margin-bottom: 0.5em; }
+          h1 { font-size: 18px; }
+          h2 { font-size: 16px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+          h3 { font-size: 14px; }
+          p { margin-bottom: 1em; page-break-inside: avoid; }
+          ul, ol { margin-bottom: 1em; padding-left: 20px; }
+          li { margin-bottom: 4px; page-break-inside: avoid; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 1em; }
+          thead { display: table-header-group; } /* This forces the header to repeat on new pages! */
+          tr { page-break-inside: avoid; }
+          th, td { border: 1px solid #e2e8f0; padding: 8px; text-align: left; }
+          th { background: #f8fafc; }
+          @media print {
+            body { padding: 0; }
+            @page { margin: 15mm; }
+          }
+        </style>
+        </head>
+        <body>
+        <div style="margin-bottom: 25px; border-bottom: 2px solid #ddd; padding-bottom: 15px;">
+          <h1 style="font-size: 20px; color: #0f172a; margin-bottom: 8px;">Pre-Bid Query Analysis Report</h1>
+          <div style="font-size: 14px; color: #64748b;">
+            <strong>Generated:</strong> ${new Date().toLocaleDateString()}
+          </div>
+        </div>
+        ${metadataHtml}
+        <div class="report-content">
+          ${marked.parse(markdownReport)}
+        </div>
+        </body>
+        </html>
+      `;
 
-      await html2pdf().set(opt).from(container).save();
+      // Create a hidden iframe to trigger the browser's native print dialog
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentWindow.document;
+      doc.open();
+      doc.write(container.innerHTML);
+      doc.close();
+
+      // Wait for images/fonts to load, then print
+      setTimeout(() => {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+        }, 1000);
+      }, 500);
+
     } catch (err) {
       console.error("PDF generation failed:", err);
-      alert("Failed to generate PDF");
+      alert("Failed to generate PDF: " + err.message);
     } finally {
       setDownloading(false);
     }
@@ -154,13 +193,15 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, paddingTop: '20px' }}>
       <ActiveTenderBadge activeTenderId={activeTenderId} />
       <div style={{ display: 'grid', gap: '20px', flex: 1 }} className="panel-grid-2">
-        {/* Left Card: Input Form */}
-        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', alignSelf: 'center' }}>
-          <h2 style={{ fontSize: '15px', fontWeight: '700', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px' }}>
-            Submit Vendor Clarification Request
-          </h2>
+        {/* Left Column wrapper */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignSelf: 'center', gap: '16px' }}>
+          {/* Left Card: Input Form */}
+          <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <h2 style={{ fontSize: '15px', fontWeight: '700', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px' }}>
+              Submit Vendor Clarification Request
+            </h2>
 
-          {!activeTenderId ? (
+            {!activeTenderId ? (
             <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>
               <AlertCircle size={24} style={{ margin: '0 auto 8px auto', color: 'var(--color-warning)' }} />
               Select an active tender in Module 1 to register queries.
@@ -210,6 +251,11 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
             </form>
           )}
         </div>
+        <VendorRegistrationForm 
+            onVendorRegistered={loadVendors} 
+            wrapperStyle={{ marginTop: '0', marginBottom: '0', alignSelf: 'center', width: '100%' }} 
+          />
+        </div>
 
         {/* Right Card: Table Registry List */}
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
@@ -220,11 +266,15 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
             {queries.length > 0 && activeTenderId && (
               <button 
                 className="btn-secondary" 
-                style={{ padding: '6px 12px', fontSize: '12px' }}
+                style={{ padding: '6px 12px', fontSize: '12px', opacity: downloading ? 0.8 : 1, transition: 'all 0.2s ease-in-out' }}
                 onClick={handleDownloadQueryPDF}
                 disabled={downloading}
               >
-                <FileDown size={14} style={{ marginRight: '6px' }} />
+                {downloading ? (
+                  <Loader2 size={14} style={{ marginRight: '6px' }} className="spin-icon" />
+                ) : (
+                  <FileDown size={14} style={{ marginRight: '6px' }} />
+                )}
                 {downloading ? 'Generating PDF...' : 'Download PDF'}
               </button>
             )}

@@ -635,3 +635,79 @@ body {
   box-shadow: 0 8px 30px rgba(234, 179, 8, 0.05);
 }
 
+/* Document Processing Animations & Utilities */
+.drop-zone {
+  border: 2px dashed var(--card-border);
+  border-radius: 8px;
+  background: var(--overlay-bg);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.drop-zone.drop-active {
+  border-color: var(--accent-violet);
+  background: rgba(79, 70, 229, 0.05);
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1);
+  transform: scale(1.02);
+}
+
+.scan-laser-container {
+  position: relative;
+  width: 60px;
+  height: 75px;
+  background: var(--bg-secondary);
+  border: 2px solid var(--card-border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 0 auto 12px;
+  box-shadow: 0 4px 12px rgba(9, 9, 11, 0.05);
+}
+
+.scan-laser {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: var(--color-success);
+  box-shadow: 0 0 8px 2px rgba(15, 118, 110, 0.5);
+  animation: scan-laser-anim 2s infinite linear;
+  z-index: 2;
+}
+
+@keyframes scan-laser-anim {
+  0% { top: -2px; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+.skeleton-line {
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  margin-bottom: 8px;
+  animation: pulse-glow 1.5s infinite ease-in-out;
+}
+
+.skeleton-line.short { width: 60%; }
+.skeleton-line.medium { width: 85%; }
+.skeleton-line.long { width: 100%; }
+
+@keyframes pulse-glow {
+  0% { opacity: 0.5; background: var(--bg-tertiary); }
+  50% { opacity: 1; background: rgba(79, 70, 229, 0.2); }
+  100% { opacity: 0.5; background: var(--bg-tertiary); }
+}
+
+/* Enhancing badges specifically for the OCR tables */
+.badge-pill {
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-weight: 700;
+  font-size: 10px;
+}
+
+@keyframes spin-anim { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spin-icon { animation: spin-anim 1s linear infinite; }

@@ -40,30 +40,29 @@ class VectorService:
             if col not in collections:
                 client.create_collection(
                     collection_name=col,
-                    vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+                    vectors_config=VectorParams(size=3072, distance=Distance.COSINE)
                 )
                 logger.info(f"Created Qdrant collection: {col}")
 
-    def _simple_embed(self, text: str) -> List[float]:
+    async def _get_embedding(self, text: str) -> List[float]:
         """
-        Simple hash-based embedding for demo when no embedding model is available.
-        Replace with sentence-transformers for production.
+        Uses Gemini Text Embeddings API.
         """
         try:
-            import hashlib
-            import math
-            # 384-dim pseudo-embedding from text hash
-            words = text.lower().split()[:100]
-            vector = [0.0] * 384
-            for i, word in enumerate(words):
-                h = int(hashlib.md5(word.encode()).hexdigest(), 16)
-                for j in range(min(4, 384 - i * 4)):
-                    vector[i * 4 + j] = ((h >> (j * 8)) & 0xFF) / 255.0 - 0.5
-            # Normalize
-            mag = math.sqrt(sum(x * x for x in vector)) or 1.0
-            return [x / mag for x in vector]
-        except Exception:
-            return [0.0] * 384
+            import httpx
+            from app.core.config import settings
+            if not settings.GEMINI_API_KEY:
+                return [0.0] * 3072
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent?key={settings.GEMINI_API_KEY}"
+            payload = {"model": "models/gemini-embedding-2", "content": {"parts": [{"text": text}]}}
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                return data["embedding"]["values"]
+        except Exception as e:
+            logger.error(f"Embedding failed: {e}")
+            return [0.0] * 3072
 
     async def store_document(self, collection: str, doc_id: str, text: str, metadata: dict) -> bool:
         client = self._get_client()
@@ -76,11 +75,11 @@ class VectorService:
             points = []
             for i, chunk in enumerate(chunks):
                 point_id = int(hashlib.md5(f"{doc_id}_{i}".encode()).hexdigest()[:8], 16)
-                vector = self._simple_embed(chunk)
+                vector = await self._get_embedding(chunk)
                 points.append(PointStruct(
                     id=point_id,
                     vector=vector,
-                    payload={**metadata, "doc_id": doc_id, "chunk_index": i, "text": chunk[:500]}
+                    payload={**metadata, "doc_id": doc_id, "chunk_index": i, "text": chunk}
                 ))
             client.upsert(collection_name=collection, points=points)
             logger.info(f"Stored {len(points)} chunks in {collection} for doc {doc_id}")
@@ -89,23 +88,57 @@ class VectorService:
             logger.error(f"Vector store failed: {e}")
             return False
 
-    async def search(self, collection: str, query: str, top_k: int = 5) -> List[dict]:
+    async def search(self, collection: str, query: str, top_k: int = 5, query_filter: dict = None) -> List[dict]:
         client = self._get_client()
         if not client:
             return []
         try:
-            vector = self._simple_embed(query)
-            results = client.search(collection_name=collection, query_vector=vector, limit=top_k)
+            from qdrant_client.http import models
+            vector = await self._get_embedding(query)
+            
+            qdrant_filter = None
+            if query_filter:
+                must_conditions = []
+                for key, val in query_filter.items():
+                    must_conditions.append(
+                        models.FieldCondition(
+                            key=key,
+                            match=models.MatchValue(value=val)
+                        )
+                    )
+                qdrant_filter = models.Filter(must=must_conditions)
+                
+            results = client.search(
+                collection_name=collection, 
+                query_vector=vector, 
+                limit=top_k,
+                query_filter=qdrant_filter
+            )
             return [{"score": r.score, "payload": r.payload} for r in results]
         except Exception as e:
             logger.error(f"Vector search failed: {e}")
             return []
 
     def _chunk_text(self, text: str, chunk_size: int = 500) -> List[str]:
-        words = text.split()
+        import re
+        sections = re.split(r'(?m)^## ', text)
         chunks = []
-        for i in range(0, len(words), chunk_size):
-            chunks.append(" ".join(words[i:i + chunk_size]))
+        for section in sections:
+            section = section.strip()
+            if not section:
+                continue
+            if not text.startswith("## ") and section == sections[0].strip():
+                chunk = section
+            else:
+                chunk = "## " + section
+            
+            if len(chunk.split()) > chunk_size:
+                words = chunk.split()
+                for i in range(0, len(words), chunk_size):
+                    chunks.append(" ".join(words[i:i + chunk_size]))
+            else:
+                chunks.append(chunk)
+                
         return chunks if chunks else [text]
 
 

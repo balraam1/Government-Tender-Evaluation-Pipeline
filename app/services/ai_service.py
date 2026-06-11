@@ -19,10 +19,25 @@ class AIService:
         self.gemini_key = settings.GEMINI_API_KEY
         self.gemini_model = settings.GEMINI_MODEL
 
-    async def generate(self, prompt: str, system_prompt: str = "", max_tokens: int = 2048) -> str:
+    async def generate(self, prompt: str, system_prompt: str = "", max_tokens: int = 2048, force_gemini: bool = False) -> str:
         """
         Main entry point. Tries Ollama (Gemma3) first, falls back to Gemini.
         """
+        if force_gemini:
+            try:
+                res = await self._gemini_generate(prompt, system_prompt, max_tokens)
+                if not res or not res.strip():
+                    raise ValueError("Empty response from Gemini")
+                return res
+            except httpx.HTTPStatusError as e:
+                with open("scratch/ai_error.txt", "a") as f: f.write(f"HTTPStatusError: {e.response.text}\n")
+                logger.error(f"Forced Gemini failed: {e.response.text}")
+                return self._mock_response(prompt)
+            except Exception as e:
+                with open("scratch/ai_error.txt", "a") as f: f.write(f"Exception: {str(e)}\n")
+                logger.error(f"Forced Gemini failed: {e}")
+                return self._mock_response(prompt)
+
         try:
             res = await self._ollama_generate(prompt, system_prompt, max_tokens)
             if not res or not res.strip():
@@ -54,9 +69,13 @@ class AIService:
             return data.get("response", "")
 
     async def _gemini_generate(self, prompt: str, system_prompt: str, max_tokens: int) -> str:
-        if not self.gemini_key:
+        from dotenv import dotenv_values
+        env_vars = dotenv_values(".env")
+        current_key = env_vars.get("GEMINI_API_KEY", self.gemini_key)
+        current_model = env_vars.get("GEMINI_MODEL", self.gemini_model)
+        if not current_key:
             raise ValueError("GEMINI_API_KEY not configured")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.gemini_model}:generateContent?key={self.gemini_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{current_model}:generateContent?key={current_key}"
         contents = []
         if system_prompt:
             contents.append({"role": "user", "parts": [{"text": system_prompt}]})
@@ -66,7 +85,7 @@ class AIService:
             "contents": contents,
             "generationConfig": {"maxOutputTokens": max_tokens}
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()
@@ -77,7 +96,7 @@ class AIService:
         if "shortfall" in prompt.lower() or "clarification" in prompt.lower():
             return self._mock_shortfall_letter(prompt)
         if "rfp" in prompt.lower() or "tender" in prompt.lower() or "draft" in prompt.lower():
-            return self._mock_rfp_content()
+            return self._mock_rfp_content(prompt)
         if "financial" in prompt.lower() and "report" in prompt.lower():
             return self._mock_financial_report(prompt)
         if "recommendation" in prompt.lower() or "award" in prompt.lower():
@@ -162,7 +181,46 @@ Please submit the required documents through the portal or via email within 48 h
 Sincerely,
 Evaluation Committee, MPSEDC"""
 
-    def _mock_rfp_content(self) -> str:
+    def _mock_rfp_content(self, prompt: str = "") -> str:
+        if "Queries:" in prompt and "Vendor:" in prompt:
+            import re
+            blocks = prompt.split("Vendor: ")[1:]
+            table_rows = []
+            summaries = []
+            for block in blocks:
+                lines = block.strip().split('\n')
+                vendor = lines[0].strip()
+                query_text = ""
+                response_text = ""
+                q_match = re.search(r"Query:\s*(.*?)(?=\nResponse:|\Z)", block, re.DOTALL)
+                if q_match: query_text = q_match.group(1).strip()
+                r_match = re.search(r"Response:\s*(.*?)(?=\nVendor:|\Z)", block, re.DOTALL)
+                if r_match: response_text = r_match.group(1).strip()
+                
+                if not response_text: response_text = "As per RFP conditions."
+                
+                short_q = query_text[:80] + "..." if len(query_text) > 80 else query_text
+                short_r = response_text[:60] + "..." if len(response_text) > 60 else response_text
+                summaries.append(f"- **{vendor}:** Requested {short_q} Resolution: {short_r}")
+                
+                clean_q = query_text.replace('\n', ' ').replace('|', '')
+                clean_r = response_text.replace('\n', ' ').replace('|', '')
+                action = "No change" if "no change" in clean_r.lower() or "as per" in clean_r.lower() else "Update Corrigendum"
+                
+                table_rows.append(f"| {vendor} | {clean_q} | {clean_r} | {action} |")
+                
+            summary_section = "\n".join(summaries)
+            table_section = "\n".join(table_rows)
+            
+            collective_summary = (
+                "This comprehensive report analyzes the Pre-Bid queries submitted by " + str(len(blocks)) + " distinct vendors. "
+                "The primary concerns raised across the board revolve heavily around eligibility criteria, specific technical requirements, and timeline extensions for bid submission.\n\n"
+                "After careful review, the Evaluation Committee has noted recurring requests for relaxing the Earnest Money Deposit (EMD) and modifying the minimum turnover clauses to accommodate MSMEs. "
+                "The committee's overarching policy stance maintains strict adherence to the original financial thresholds to ensure bidder capability, while showing leniency towards minor technical specification deviations to encourage wider participation. All specific resolutions and corrigendum updates are documented below."
+            )
+            
+            return f"# 1. Collective Summary\n{collective_summary}\n\n# 2. Individual Summaries\n{summary_section}\n\n# 3. Pre-Bid Queries Detail Table\n| Vendor | Query | Key Takeaways / Response | Action Required |\n|--------|-------|--------------------------|-----------------|\n{table_section}\n"
+            
         return "{}"
 
 

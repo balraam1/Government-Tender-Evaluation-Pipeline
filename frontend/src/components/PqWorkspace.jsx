@@ -7,7 +7,7 @@ import api from '../services/api';
 import StreamText from './StreamText';
 import FlowConnector from './FlowConnector';
 
-const VendorRegistrationForm = ({ onVendorRegistered }) => {
+export const VendorRegistrationForm = ({ onVendorRegistered, wrapperStyle }) => {
   const [formData, setFormData] = useState({
     vendor_name: '', gst_number: '', pan_number: '', email: '', phone: ''
   });
@@ -42,7 +42,7 @@ const VendorRegistrationForm = ({ onVendorRegistered }) => {
 
   if (!isExpanded) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', marginTop: '60px', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: '60px', marginBottom: '16px', ...wrapperStyle }}>
         <button className="btn-primary" onClick={() => setIsExpanded(true)} style={{ gap: '8px', padding: '10px 20px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)' }}>
           <UserPlus size={16} />
           <span>Register New Vendor</span>
@@ -52,7 +52,7 @@ const VendorRegistrationForm = ({ onVendorRegistered }) => {
   }
 
   return (
-    <div className="glass-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '600px', margin: '60px auto 16px auto', width: '100%', animation: 'fadeIn 0.3s ease-out' }}>
+    <div className="glass-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '600px', margin: '60px auto 16px auto', width: '100%', animation: 'fadeIn 0.3s ease-out', ...wrapperStyle }}>
       <div style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <UserPlus size={18} style={{ color: 'var(--color-primary)' }} />

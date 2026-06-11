@@ -34,11 +34,15 @@ export const api = {
   // Pre-Bid Queries
   getPreBidQueries: (tenderId) => request(`/prebid/${tenderId}/queries`),
   analyzePreBidQuery: (data) => request('/prebid/analyze', { method: 'POST', body: data }),
+  generatePreBidReport: (tenderId) => request(`/prebid/${tenderId}/export_report`, { method: 'POST' }),
 
   // Document Processing
   uploadDocument: (formData) => request('/document/upload', { method: 'POST', body: formData }),
   extractDocumentMetadata: (docId) => request('/document/extract', { method: 'POST', body: { document_id: docId } }),
   getDocument: (id) => request(`/document/${id}`),
+  getDocumentStatus: (id) => request(`/document/${id}/status`),
+  updateDocumentMetadata: (id, data) => request(`/document/${id}`, { method: 'PUT', body: data }),
+  commitDocument: (id) => request(`/document/${id}/commit`, { method: 'POST' }),
   getDocumentHistory: (tenderId) => request(`/document/history${tenderId ? `?tender_id=${tenderId}` : ''}`),
   getDocumentDownloadUrl: (id) => `${API_BASE}/document/${id}/download`,
 

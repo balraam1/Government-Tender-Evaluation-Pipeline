@@ -15,6 +15,7 @@ from app.core.database import get_db
 from app.schemas import RFPGenerateRequest, RFPGenerateResponse, TenderResponse, RFPUpdateRequest
 from app.models import Tender, TenderStatus, AuditLog
 from app.services.ai_service import ai_service
+from app.services.vector_service import vector_service
 
 router = APIRouter(prefix="/api/rfp", tags=["Module 1 - RFP Generation"])
 logger = logging.getLogger(__name__)
@@ -95,6 +96,16 @@ async def generate_rfp(req: RFPGenerateRequest, db: Session = Depends(get_db)):
         deliverables=sections["deliverables"],
         generated_rfp=sections["full_rfp"],
         status=TenderStatus.DRAFT,
+        min_turnover=req.min_turnover,
+        min_experience=req.min_experience,
+        emd_amount=req.emd_amount,
+        pbg_percentage=req.pbg_percentage,
+        contract_duration=req.contract_duration,
+        selection_method=req.selection_method,
+        contract_type=req.contract_type,
+        pre_bid_date=datetime.fromisoformat(req.pre_bid_date.replace("Z", "+00:00")) if req.pre_bid_date else None,
+        submission_deadline=datetime.fromisoformat(req.submission_deadline.replace("Z", "+00:00")) if req.submission_deadline else None,
+        vector_stored=0
     )
     db.add(tender)
     
@@ -112,7 +123,7 @@ async def generate_rfp(req: RFPGenerateRequest, db: Session = Depends(get_db)):
     
     log.tender_id = tender.id
     db.commit()
-    
+
     logger.info(f"RFP generated: {tender_number}")
     
     return RFPGenerateResponse(
@@ -159,12 +170,21 @@ def get_tender(tender_id: int, db: Session = Depends(get_db)):
         "evaluation_criteria": tender.evaluation_criteria,
         "deliverables": tender.deliverables,
         "generated_rfp": tender.generated_rfp,
+        "min_turnover": tender.min_turnover,
+        "min_experience": tender.min_experience,
+        "emd_amount": tender.emd_amount,
+        "pbg_percentage": tender.pbg_percentage,
+        "contract_duration": tender.contract_duration,
+        "selection_method": tender.selection_method,
+        "contract_type": tender.contract_type,
+        "pre_bid_date": tender.pre_bid_date,
+        "vector_stored": bool(tender.vector_stored),
         "created_at": tender.created_at,
     }
 
 
 @router.put("/{tender_id}", summary="Update generated RFP document")
-def update_rfp(tender_id: int, req: RFPUpdateRequest, db: Session = Depends(get_db)):
+async def update_rfp(tender_id: int, req: RFPUpdateRequest, db: Session = Depends(get_db)):
     tender = db.query(Tender).filter(Tender.id == tender_id).first()
     if not tender:
         raise HTTPException(status_code=404, detail="Tender not found")
@@ -181,6 +201,21 @@ def update_rfp(tender_id: int, req: RFPUpdateRequest, db: Session = Depends(get_
     )
     db.add(log)
     db.commit()
+    
+    # HITL Vectorization: Store to Qdrant after human confirms changes
+    try:
+        success = await vector_service.store_document(
+            collection="tender_documents",
+            doc_id=f"TENDER_{tender.id}",
+            text=tender.generated_rfp,
+            metadata={"tender_id": tender.id, "document_type": "RFP"}
+        )
+        if success:
+            tender.vector_stored = 1
+            db.commit()
+    except Exception as e:
+        logger.error(f"Auto-vectorization failed: {e}")
+
     db.refresh(tender)
     
     return {"status": "success", "message": "RFP document updated successfully"}

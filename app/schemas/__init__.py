@@ -80,6 +80,15 @@ class TenderResponse(BaseModel):
     deliverables: Optional[str] = None
     generated_rfp: Optional[str] = None
     status: str
+    min_turnover: Optional[float] = 0.0
+    min_experience: Optional[int] = 0
+    emd_amount: Optional[float] = 0.0
+    pbg_percentage: Optional[float] = 0.0
+    contract_duration: Optional[str] = None
+    selection_method: Optional[str] = None
+    contract_type: Optional[str] = None
+    pre_bid_date: Optional[datetime] = None
+    vector_stored: Optional[bool] = False
     created_at: datetime
 
     class Config:

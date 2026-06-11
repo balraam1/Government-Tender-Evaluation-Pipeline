@@ -171,6 +171,89 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
+  
+  const [editedMeta, setEditedMeta] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [committing, setCommitting] = useState(false);
+
+  useEffect(() => {
+    let interval;
+    if (uploadedDoc && uploadedDoc.status === 'PROCESSING') {
+      interval = setInterval(async () => {
+        try {
+          const res = await api.getDocumentStatus(uploadedDoc.document_id || uploadedDoc.id);
+          if (res.status !== 'PROCESSING') {
+            clearInterval(interval);
+            handleViewDocument(uploadedDoc.document_id || uploadedDoc.id);
+            loadHistory();
+          }
+        } catch (err) {
+          console.error("Polling error:", err);
+        }
+      }, 3000);
+    }
+    return () => clearInterval(interval);
+  }, [uploadedDoc]);
+
+  useEffect(() => {
+    if (extractedMeta) {
+      setEditedMeta(extractedMeta);
+    } else {
+      setEditedMeta({});
+    }
+  }, [extractedMeta]);
+
+  async function handleSaveDraft() {
+    if (!uploadedDoc) return;
+    setSaving(true);
+    try {
+      await api.updateDocumentMetadata(uploadedDoc.document_id || uploadedDoc.id, { metadata: editedMeta });
+      alert("Draft saved successfully.");
+      handleViewDocument(uploadedDoc.document_id || uploadedDoc.id);
+    } catch(err) {
+      alert(`Save failed: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCommit() {
+    if (!uploadedDoc) return;
+    setCommitting(true);
+    try {
+      const res = await api.commitDocument(uploadedDoc.document_id || uploadedDoc.id);
+      alert(res.message);
+      handleViewDocument(uploadedDoc.document_id || uploadedDoc.id);
+      loadHistory();
+    } catch(err) {
+      alert(`Commit failed: ${err.message}`);
+    } finally {
+      setCommitting(false);
+    }
+  }
+
+  function handleMetaChange(key, val) {
+    setEditedMeta(prev => ({ ...prev, [key]: val }));
+  }
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragActive(true);
+  };
+  
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setIsDragActive(false);
+  };
+  
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      setFile(e.dataTransfer.files[0]);
+    }
+  };
 
   // Reload history whenever the active tender changes
   useEffect(() => {
@@ -215,9 +298,8 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
     try {
       const data = await api.uploadDocument(formData);
       setUploadedDoc({ ...data, isNew: true });
-      setExtractedMeta(processMetadata(data.metadata));
+      setExtractedMeta(null);
       setFile(null);
-      loadHistory(); // Refresh history after new upload
     } catch (err) {
       alert(`Upload/OCR Failed: ${err.message}`);
     } finally {
@@ -353,38 +435,53 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
         </h2>
 
         <form onSubmit={handleUpload} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ 
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '2px dashed var(--card-border)', 
-            borderRadius: '8px', 
-            width: '240px',
-            height: '115px',
-            margin: '0 auto',
-            padding: '16px', 
-            textAlign: 'center', 
-            background: 'var(--overlay-bg)',
-            cursor: 'pointer',
-            transition: 'border-color 0.2s',
-            boxSizing: 'border-box'
-          }}
-          onClick={() => document.getElementById('file-picker').click()}
+          <div 
+            className={`drop-zone ${isDragActive ? 'drop-active' : ''}`}
+            style={{ 
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '100%',
+              minHeight: '140px',
+              padding: '24px', 
+              textAlign: 'center', 
+              cursor: 'pointer',
+              boxSizing: 'border-box'
+            }}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={() => document.getElementById('file-picker').click()}
           >
-            <Upload size={28} style={{ color: 'var(--text-muted)', marginBottom: '8px' }} />
-            <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)', lineHeight: '1.3' }}>
-              {file ? file.name : 'Click to Browse Bid/Tender Document'}
-            </div>
-            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', lineHeight: '1.2' }}>
-              Supports PDF, DOC, DOCX up to 10MB
-            </div>
+            {(uploading || extracting) ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div className="scan-laser-container">
+                  <div className="scan-laser"></div>
+                  <FileText size={32} style={{ color: 'var(--text-muted)', margin: '18px auto' }} />
+                </div>
+                <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--accent-violet)', marginTop: '8px' }}>
+                  {uploading ? 'Scanning Document...' : 'Extracting Data...'}
+                </div>
+              </div>
+            ) : (
+              <>
+                <Upload size={32} style={{ color: isDragActive ? 'var(--accent-violet)' : 'var(--text-muted)', marginBottom: '12px', transition: 'color 0.2s' }} />
+                <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)', lineHeight: '1.3' }}>
+                  {file ? file.name : 'Drag & Drop or Click to Browse'}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: '1.4' }}>
+                  Supports PDF, DOC, DOCX up to 10MB
+                </div>
+              </>
+            )}
             <input 
               id="file-picker"
               type="file" 
               accept=".pdf,.doc,.docx"
               style={{ display: 'none' }}
               onChange={handleFileChange}
+              disabled={uploading || extracting}
             />
           </div>
 
@@ -435,6 +532,28 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
                 <CheckCircle size={16} color="var(--color-success)" />
                 <span style={{ fontSize: '13px', fontWeight: '600' }}>OCR Processing Complete</span>
               </div>
+              
+              {uploadedDoc && uploadedDoc.status !== 'COMMITTED' && (
+                <div style={{ display: 'flex', gap: '12px', marginTop: '20px', borderTop: '1px solid var(--card-border)', paddingTop: '16px' }}>
+                  <button 
+                    className="btn-secondary" 
+                    style={{ flex: 1, justifyContent: 'center', borderColor: 'var(--color-success)', color: 'var(--color-success)' }}
+                    onClick={handleSaveDraft}
+                    disabled={saving || committing}
+                  >
+                    {saving ? 'Saving...' : 'Save Draft'}
+                  </button>
+                  <button 
+                    className="btn-primary" 
+                    style={{ flex: 1, justifyContent: 'center', background: 'var(--color-success)' }}
+                    onClick={handleCommit}
+                    disabled={saving || committing}
+                  >
+                    <CheckCircle size={16} style={{ marginRight: '6px' }} />
+                    {committing ? 'Committing...' : 'Lock & Commit to Vector DB'}
+                  </button>
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'center', fontSize: '12px', background: 'var(--overlay-bg)', border: '1px solid var(--card-border)', padding: '10px', borderRadius: '6px' }}>
@@ -465,20 +584,27 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
           )}
         </div>
 
-        {(extracting || uploading) && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '12px' }}>
-            <div className="terminal-cursor" style={{ width: '12px', height: '22px' }}></div>
-            <div style={{ color: 'var(--text-secondary)' }}>AI Agent is parsing dates, budgets, and criteria clauses...</div>
+        {(extracting || uploading || (uploadedDoc && uploadedDoc.status === 'PROCESSING')) && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px' }}>
+            <Brain size={36} style={{ color: 'var(--accent-violet)', animation: 'pulse-glow 2s infinite' }} />
+            <div style={{ color: 'var(--text-secondary)', fontWeight: '500' }}>AI Agent is parsing document contents...</div>
+            <div style={{ width: '80%', maxWidth: '300px', marginTop: '16px' }}>
+              <div className="skeleton-line long"></div>
+              <div className="skeleton-line medium"></div>
+              <div className="skeleton-line short"></div>
+              <div className="skeleton-line long" style={{ marginTop: '16px' }}></div>
+              <div className="skeleton-line short"></div>
+            </div>
           </div>
         )}
 
-        {!(extracting || uploading) && !uploadedDoc && (
+        {!(extracting || uploading || (uploadedDoc && uploadedDoc.status === 'PROCESSING')) && !uploadedDoc && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', textAlign: 'center' }}>
             Upload a document on the left to see the OCR<br/>transcription and structural AI parsing.
           </div>
         )}
 
-        {!(extracting || uploading) && uploadedDoc && (() => {
+        {!(extracting || uploading || (uploadedDoc && uploadedDoc.status === 'PROCESSING')) && uploadedDoc && (() => {
           const keysToExclude = [
             'document_id', 'file_name', 'extracted_at', 'processed_at', 
             'file_size_bytes', 'ocr_method', 'accuracy_estimate', 
@@ -556,15 +682,36 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
                   }
 
                   const isTextSummary = key === 'document_text_summary';
+                  const confidence = uploadedDoc.confidence_scores?.[key];
+                  const isLowConfidence = confidence !== undefined && confidence < 0.85;
+                  
+                  const fieldStyle = {
+                     borderBottom: isTextSummary ? 'none' : '1px solid var(--card-border)', 
+                     paddingBottom: '12px',
+                     padding: '8px',
+                     borderRadius: '6px',
+                     backgroundColor: isLowConfidence ? 'rgba(234, 179, 8, 0.15)' : 'transparent',
+                     border: isLowConfidence ? '1px solid rgba(234, 179, 8, 0.4)' : '1px solid transparent',
+                     transition: 'all 0.2s ease',
+                     marginBottom: '8px'
+                  };
 
                   return (
-                    <div key={key} style={{ borderBottom: isTextSummary ? 'none' : '1px solid var(--card-border)', paddingBottom: '12px' }}>
+                    <div key={key} style={fieldStyle}>
                       {!isTextSummary && (
-                        <div style={{ fontSize: '13px', color: 'var(--text-primary)' }}>
-                          <strong>{formatKey(key)}</strong>:
+                        <div style={{ fontSize: '13px', color: 'var(--text-primary)', display: 'flex', justifyContent: 'space-between' }}>
+                          <strong>{formatKey(key)}</strong>
+                          {isLowConfidence && <span style={{fontSize: '10px', color: '#ca8a04', fontWeight: 'bold'}}>AI Confidence: {(confidence*100).toFixed(0)}% - Please Review</span>}
                         </div>
                       )}
-                      {renderedVal}
+                      {uploadedDoc.status === 'COMMITTED' || isTextSummary || Array.isArray(value) || typeof value === 'object' ? renderedVal : (
+                         <input 
+                           className="glass-input"
+                           style={{ marginTop: '6px', width: '100%', border: isLowConfidence ? '1px solid #ca8a04' : undefined }}
+                           value={editedMeta[key] || ''}
+                           onChange={(e) => handleMetaChange(key, e.target.value)}
+                         />
+                      )}
                     </div>
                   );
                 })}
@@ -634,24 +781,21 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
                       {doc.file_name}
                     </td>
                     <td style={{ padding: '8px 10px' }}>
-                      <span className="badge badge-info" style={{ fontSize: '9px', whiteSpace: 'nowrap' }}>{doc.document_type}</span>
+                      <span className="badge badge-info badge-pill">{doc.document_type}</span>
                     </td>
-                    <td style={{ padding: '8px 10px', color: doc.vendor_id ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                    <td style={{ padding: '8px 10px', color: doc.vendor_id ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: doc.vendor_id ? '600' : 'normal' }}>
                       {doc.vendor_id ?? '—'}
                     </td>
 
                     <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-                      <span style={{
-                        fontWeight: '700',
-                        color: doc.ocr_accuracy >= 90 ? 'var(--color-success)' : doc.ocr_accuracy >= 70 ? 'var(--color-warning)' : 'var(--color-danger)'
-                      }}>
+                      <span className={`badge badge-pill ${doc.ocr_accuracy >= 90 ? 'badge-success' : doc.ocr_accuracy >= 70 ? 'badge-warning' : 'badge-danger'}`}>
                         {doc.ocr_accuracy}%
                       </span>
                     </td>
                     <td style={{ padding: '8px 10px', textAlign: 'center' }}>
                       {doc.vector_stored
-                        ? <span style={{ color: 'var(--color-success)', fontWeight: '700', fontSize: '13px' }}>✓</span>
-                        : <span style={{ color: 'var(--color-danger)', fontSize: '13px' }}>✗</span>
+                        ? <span className="badge badge-success badge-pill">✓ Yes</span>
+                        : <span className="badge badge-danger badge-pill">✗ No</span>
                       }
                     </td>
                     <td style={{ padding: '8px 10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>

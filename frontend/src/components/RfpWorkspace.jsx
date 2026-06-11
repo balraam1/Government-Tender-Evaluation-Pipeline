@@ -111,9 +111,9 @@ export const RfpWorkspace = ({ activeTenderId, onSelectTender }) => {
       const id = currentDisplay.tender_id || currentDisplay.id;
       await api.updateRFP(id, { full_rfp_document: finalContent });
       if (generatedDoc) {
-        setGeneratedDoc({...generatedDoc, full_rfp_document: finalContent});
+        setGeneratedDoc({...generatedDoc, full_rfp_document: finalContent, vector_stored: 1});
       } else if (selectedTender) {
-        setSelectedTender({...selectedTender, generated_rfp: finalContent});
+        setSelectedTender({...selectedTender, generated_rfp: finalContent, vector_stored: 1});
       }
       setIsModalOpen(false);
     } catch (err) {
@@ -255,6 +255,7 @@ export const RfpWorkspace = ({ activeTenderId, onSelectTender }) => {
           </div>
           
           {currentDisplay ? (
+            <>
             <div className="output-stream-card" style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '16px', borderRadius: '8px' }}>
               <div>
                 <label style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Tender Title</label>
@@ -281,6 +282,13 @@ export const RfpWorkspace = ({ activeTenderId, onSelectTender }) => {
                 </div>
               </div>
             </div>
+            {currentDisplay.vector_stored && (
+              <div className="glass-card" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 16px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '8px', marginTop: '10px' }}>
+                <Server size={16} style={{ color: 'var(--color-success)' }} />
+                <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--color-success)' }}>Vector DB is populated</span>
+              </div>
+            )}
+            </>
           ) : (
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               

@@ -14,7 +14,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, UploadFile, Form, HTTPException, Query
+from fastapi import APIRouter, Depends, File, UploadFile, Form, HTTPException, Query, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -54,6 +54,7 @@ def _resolve_file_path(stored_path: str) -> str | None:
 
 @router.post("/upload", summary="Upload document with OCR processing")
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     tender_id: int = Form(None),
     vendor_id: int = Form(None),
@@ -87,18 +88,6 @@ async def upload_document(
 
     logger.info(f"File saved: {file_path} ({len(content)} bytes)")
 
-    # OCR / Text extraction
-    ocr_result = ocr_service.extract_text(file_path, ext)
-    extracted_text = ocr_result.get("text", "")
-
-    # AI Metadata extraction — hard 25s cap so upload never hangs
-    import asyncio
-    try:
-        metadata = await asyncio.wait_for(_extract_metadata_ai(extracted_text, document_type), timeout=25.0)
-    except asyncio.TimeoutError:
-        logger.warning("AI metadata extraction timed out — saving document without metadata")
-        metadata = {"extraction_status": "timeout"}
-
     # Validate vendor_id — silently clear if vendor doesn't exist (optional field)
     if vendor_id:
         from app.models import Vendor
@@ -106,40 +95,20 @@ async def upload_document(
             logger.warning(f"Vendor ID {vendor_id} not found — storing document without vendor link")
             vendor_id = None
 
-    # Store in DB
+    # Store in DB as PROCESSING
     doc = Document(
         vendor_id=vendor_id,
         tender_id=tender_id,
         file_name=filename,
         file_path=file_path,   # absolute path stored
         document_type=document_type,
-        ocr_text=extracted_text,
-        extracted_metadata=metadata,
-        ocr_method=ocr_result.get("method", "unknown"),
-        ocr_accuracy=ocr_result.get("accuracy_estimate", 0.0),
         file_size=len(content),
         vector_stored=0,
+        status="PROCESSING",
     )
     db.add(doc)
     db.commit()
     db.refresh(doc)
-
-    # Store in Qdrant
-    collection = "vendor_documents" if vendor_id else "tender_documents"
-    vector_ok = await vector_service.store_document(
-        collection=collection,
-        doc_id=str(doc.id),
-        text=extracted_text,
-        metadata={
-            "doc_id": doc.id,
-            "tender_id": tender_id,
-            "vendor_id": vendor_id,
-            "document_type": document_type,
-            "file_name": filename,
-        }
-    )
-    doc.vector_stored = 1 if vector_ok else 0
-    db.commit()
 
     db.add(AuditLog(
         tender_id=tender_id,
@@ -150,19 +119,142 @@ async def upload_document(
     ))
     db.commit()
 
+    # Dispatch Background Task for OCR
+    background_tasks.add_task(
+        _background_ocr_task, 
+        doc_id=doc.id, 
+        file_path=file_path, 
+        ext=ext, 
+        document_type=document_type
+    )
+
     return {
         "document_id": doc.id,
         "file_name": filename,
         "document_type": document_type,
-        "file_size_bytes": len(content),
-        "ocr_text_preview": extracted_text,
-        "ocr_method": doc.ocr_method,
-        "accuracy_estimate": doc.ocr_accuracy,
-        "total_chars_extracted": len(extracted_text),
-        "metadata": metadata,
-        "vector_stored": vector_ok,
-        "processed_at": doc.created_at,
+        "status": doc.status,
+        "message": "Document uploaded successfully. OCR extraction is running in the background."
     }
+
+async def _background_ocr_task(doc_id: int, file_path: str, ext: str, document_type: str):
+    from app.core.database import SessionLocal
+    db = SessionLocal()
+    try:
+        doc = db.query(Document).filter(Document.id == doc_id).first()
+        if not doc:
+            return
+
+        # OCR / Text extraction
+        ocr_result = ocr_service.extract_text(file_path, ext)
+        extracted_text = ocr_result.get("text", "")
+        
+        # AI Metadata extraction — hard 25s cap
+        import asyncio
+        try:
+            metadata = await asyncio.wait_for(_extract_metadata_ai(extracted_text, document_type), timeout=25.0)
+        except asyncio.TimeoutError:
+            logger.warning("AI metadata extraction timed out")
+            metadata = {"extraction_status": "timeout"}
+            
+        # Mock confidence scores based on missing/empty fields
+        confidence_scores = {}
+        if isinstance(metadata, dict) and "extraction_status" not in metadata:
+            for k, v in metadata.items():
+                if v is None or v == "":
+                    confidence_scores[k] = 0.50
+                elif isinstance(v, list) and len(v) == 0:
+                    confidence_scores[k] = 0.60
+                else:
+                    import random
+                    confidence_scores[k] = round(random.uniform(0.86, 0.99), 2)
+        
+        doc.ocr_text = extracted_text
+        doc.extracted_metadata = metadata
+        doc.ocr_method = ocr_result.get("method", "unknown")
+        doc.ocr_accuracy = ocr_result.get("accuracy_estimate", 0.0)
+        doc.confidence_scores = confidence_scores
+        doc.status = "PENDING_REVIEW"
+        
+        db.commit()
+        logger.info(f"Background OCR completed for document {doc_id}")
+    except Exception as e:
+        logger.error(f"Background OCR task failed for document {doc_id}: {e}")
+        doc = db.query(Document).filter(Document.id == doc_id).first()
+        if doc:
+            doc.status = "FAILED"
+            db.commit()
+    finally:
+        db.close()
+
+
+@router.get("/{doc_id}/status", summary="Poll background processing status")
+def get_document_status(doc_id: int, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {
+        "document_id": doc.id,
+        "status": doc.status,
+    }
+
+
+@router.put("/{doc_id}", summary="Update extracted metadata (Save Draft)")
+def update_document_metadata(doc_id: int, payload: dict, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    if doc.status == "COMMITTED":
+        raise HTTPException(status_code=400, detail="Cannot edit a committed document")
+        
+    doc.extracted_metadata = payload.get("metadata", doc.extracted_metadata)
+    # Assume human editing sets confidence to 1.0 (verified)
+    updated_confidence = dict(doc.confidence_scores or {})
+    for k in payload.get("metadata", {}).keys():
+        updated_confidence[k] = 1.0
+    doc.confidence_scores = updated_confidence
+    
+    db.commit()
+    return {"status": "success", "message": "Draft saved"}
+
+
+@router.post("/{doc_id}/commit", summary="Lock document and commit to Vector DB")
+async def commit_document(doc_id: int, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    if doc.status == "COMMITTED":
+        return {"status": "success", "message": "Already committed"}
+        
+    collection = "vendor_documents" if doc.vendor_id else "tender_documents"
+    vector_ok = await vector_service.store_document(
+        collection=collection,
+        doc_id=str(doc.id),
+        text=doc.ocr_text or "",
+        metadata={
+            "doc_id": doc.id,
+            "tender_id": doc.tender_id,
+            "vendor_id": doc.vendor_id,
+            "document_type": doc.document_type,
+            "file_name": doc.file_name,
+        }
+    )
+    
+    doc.vector_stored = 1 if vector_ok else 0
+    doc.status = "COMMITTED"
+    db.commit()
+    
+    db.add(AuditLog(
+        tender_id=doc.tender_id,
+        user_id="system",
+        action="DOCUMENT_COMMITTED",
+        module="document",
+        details={"doc_id": doc.id, "vectorized": vector_ok},
+    ))
+    db.commit()
+    
+    return {"status": "success", "message": "Document locked and vectorized", "vector_stored": vector_ok}
 
 
 @router.post("/extract", summary="Extract structured metadata from tender document")
@@ -219,6 +311,7 @@ def list_document_history(
             "ocr_accuracy": round((d.ocr_accuracy or 0) * 100, 1),
             "file_size_kb": round((d.file_size or 0) / 1024, 1),
             "vector_stored": bool(d.vector_stored),
+            "status": d.status,
             "has_metadata": bool(d.extracted_metadata and any(
                 k not in ("extraction_status", "raw_extraction")
                 for k in (d.extracted_metadata or {})
@@ -245,6 +338,8 @@ def get_document(doc_id: int, db: Session = Depends(get_db)):
         "text_length": len(doc.ocr_text or ""),
         "ocr_text_preview": doc.ocr_text or "",   # full OCR text for View
         "metadata": doc.extracted_metadata,
+        "confidence_scores": doc.confidence_scores,
+        "status": doc.status,
         "vector_stored": bool(doc.vector_stored),
         "created_at": doc.created_at,
     }

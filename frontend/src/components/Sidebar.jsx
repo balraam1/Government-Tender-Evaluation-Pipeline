@@ -12,7 +12,7 @@ export const Sidebar = ({
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
     { id: 'rfp', label: 'RFP Authoring', icon: FileText },
     { id: 'prebid', label: 'Pre-Bid Queries', icon: MessageSquare },
-    { id: 'ocr', label: 'OCR Pipeline', icon: Upload },
+    { id: 'ocr', label: 'Document Extraction', icon: Upload },
     { id: 'pq', label: 'Pre-Qualification', icon: ShieldCheck },
     { id: 'tech', label: 'Tech Evaluation', icon: Award },
     { id: 'financial', label: 'Financial Award', icon: DollarSign },
