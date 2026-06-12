@@ -371,7 +371,9 @@ async def _extract_metadata_ai(text: str, doc_type: str) -> dict:
         return {"extraction_status": "insufficient_text"}
 
     system = "You are a document analysis expert for government procurement. Extract structured metadata."
-    prompt = f"""Extract metadata from this {doc_type} document:
+    
+    if doc_type == "TENDER":
+        prompt = f"""Extract metadata from this {doc_type} document:
 ---
 {text[:4000]}
 ---
@@ -388,6 +390,72 @@ Return ONLY valid JSON (no markdown fences, no explanation):
   "evaluation_parameters": ["param 1", "param 2"],
   "contact_details": "email/phone or null",
   "key_dates": {{"pre_bid": "date", "submission": "date", "opening": "date"}}
+}}"""
+    elif doc_type == "PQ_LEGAL_FINANCIAL":
+        prompt = f"""Extract all available legal and financial metadata from this vendor document dossier:
+---
+{text[:4000]}
+---
+
+Return ONLY valid JSON (no markdown fences, no explanation). If a field is not found anywhere in the document, return null for that field:
+{{
+  "vendor_name": "Company/Entity Name or null",
+  "pan_number": "10-character PAN or null",
+  "gstin_number": "15-digit GSTIN or null",
+  "ca_registration_number": "FRN / Membership No. or null",
+  "annual_turnover_yr1": "INR amount or null",
+  "annual_turnover_yr2": "INR amount or null",
+  "annual_turnover_yr3": "INR amount or null",
+  "average_turnover": "INR amount or null",
+  "business_type": "Proprietorship / Partnership / Company or null",
+  "state": "State Name or null",
+  "date_of_birth_incorporation": "DD/MM/YYYY or null"
+}}"""
+    elif doc_type == "PQ_EXPERIENCE_CERTS":
+        prompt = f"""Extract all available experience and certification metadata from this vendor document dossier:
+---
+{text[:4000]}
+---
+
+Return ONLY valid JSON (no markdown fences, no explanation). If a field is not found anywhere in the document, return null for that field:
+{{
+  "vendor_name": "Entity Name or null",
+  "client_name": "Issuing Authority / Client or null",
+  "project_name": "Brief Title of Work or null",
+  "contract_value": "INR amount or null",
+  "completion_date": "DD/MM/YYYY or null",
+  "certificate_type": "e.g. ISO 9001:2015, MSME Udyam, etc. or null",
+  "certificate_number": "Registration No. or null",
+  "validity_end_date": "DD/MM/YYYY or null"
+}}"""
+    elif doc_type == "VENDOR_FINANCIAL":
+        prompt = f"""Extract commercial and financial bid metadata from this vendor document:
+---
+{text[:4000]}
+---
+
+Return ONLY valid JSON (no markdown fences, no explanation). If a field is not found anywhere in the document, return null for that field:
+{{
+  "vendor_name": "Entity Name or null",
+  "tender_reference": "Tender Reference ID or null",
+  "quoted_price": "Numeric extracted INR total amount (e.g., 531000000) or null",
+  "base_price": "Numeric extracted INR base amount or null",
+  "tax_amount": "Numeric extracted tax amount or null",
+  "currency": "Currency type (e.g. INR) or null"
+}}"""
+    else:
+        # Fallback generic vendor prompt
+        prompt = f"""Extract basic metadata from this {doc_type} document:
+---
+{text[:4000]}
+---
+
+Return ONLY valid JSON (no markdown fences, no explanation):
+{{
+  "document_title": "Title or null",
+  "vendor_name": "Entity Name or null",
+  "key_entities_mentioned": ["entity 1", "entity 2"],
+  "important_dates": ["date 1", "date 2"]
 }}"""
 
     response = await ai_service.generate(prompt, system, max_tokens=1000)

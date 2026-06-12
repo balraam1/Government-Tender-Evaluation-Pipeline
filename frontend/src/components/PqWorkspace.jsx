@@ -182,12 +182,67 @@ export const PqWorkspace = ({ activeTenderId }) => {
     }
   }, [activeTenderId]);
 
+  useEffect(() => {
+    if (selectedVendorId && activeTenderId) {
+      autoFillPQForm();
+    }
+  }, [selectedVendorId, activeTenderId]);
+
   async function loadVendors() {
     try {
       const data = await api.listVendors();
       setVendors(data);
     } catch (err) {
       console.error("Error loading vendors:", err);
+    }
+  }
+
+  async function autoFillPQForm() {
+    try {
+      const docs = await api.getDocumentHistory(activeTenderId).catch(() => []);
+      const vendorDocs = docs.filter(d => 
+        d.vendor_id === parseInt(selectedVendorId) && 
+        (d.document_type === 'PQ_LEGAL_FINANCIAL' || d.document_type === 'PQ_EXPERIENCE_CERTS')
+      );
+
+      if (vendorDocs.length === 0) return;
+
+      let newForm = { ...form };
+      
+      for (const doc of vendorDocs) {
+        if (!doc.has_metadata) continue;
+        const fullDoc = await api.getDocument(doc.id);
+        const meta = fullDoc.metadata || {};
+        
+        if (doc.document_type === 'PQ_LEGAL_FINANCIAL') {
+          let turnoverStr = meta.average_turnover || meta.annual_turnover_yr3 || '';
+          turnoverStr = turnoverStr.toString().replace(/[^\d.]/g, '');
+          if (turnoverStr) newForm.annual_turnover = turnoverStr;
+
+          if (meta.gstin_number) newForm.has_gst = true;
+          if (meta.pan_number) newForm.has_pan = true;
+          
+          if (meta.date_of_birth_incorporation) {
+             const yearMatch = meta.date_of_birth_incorporation.match(/\d{4}/);
+             if (yearMatch) {
+                const year = parseInt(yearMatch[0]);
+                const currentYear = new Date().getFullYear();
+                newForm.years_experience = (currentYear - year).toString();
+             }
+          }
+        } else if (doc.document_type === 'PQ_EXPERIENCE_CERTS') {
+          let projectValStr = meta.contract_value || '';
+          projectValStr = projectValStr.toString().replace(/[^\d.]/g, '');
+          if (projectValStr) newForm.similar_project_value = projectValStr;
+          
+          if (meta.certificate_type) {
+            newForm.certifications = meta.certificate_type;
+          }
+        }
+      }
+      setForm(newForm);
+    } catch (err) {
+      console.error("Error auto-filling PQ form:", err);
     }
   }
 

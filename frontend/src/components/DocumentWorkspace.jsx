@@ -161,8 +161,9 @@ function formatOcrText(text) {
 
 export const DocumentWorkspace = ({ activeTenderId }) => {
   const [file, setFile] = useState(null);
-  const [docType, setDocType] = useState('TENDER');
+  const [docType, setDocType] = useState('PQ_LEGAL_FINANCIAL');
   const [vendorId, setVendorId] = useState('');
+  const [vendors, setVendors] = useState([]);
   
   const [uploading, setUploading] = useState(false);
   const [extracting, setExtracting] = useState(false);
@@ -176,6 +177,19 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
   const [editedMeta, setEditedMeta] = useState({});
   const [saving, setSaving] = useState(false);
   const [committing, setCommitting] = useState(false);
+
+  useEffect(() => {
+    loadVendors();
+  }, []);
+
+  async function loadVendors() {
+    try {
+      const data = await api.listVendors();
+      setVendors(data);
+    } catch (err) {
+      console.error("Error loading vendors:", err);
+    }
+  }
 
   useEffect(() => {
     let interval;
@@ -426,9 +440,9 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
   }
 
   return (
-    <div className="panel-grid panel-grid-2">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '100%', height: '100%', maxWidth: '700px', margin: '0 auto' }}>
       <ActiveTenderBadge activeTenderId={activeTenderId} />
-      {/* Left Pane: Upload Form & Metadata Extractor */}
+      {/* Upload Form & Metadata Extractor */}
       <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
         <h2 style={{ fontSize: '16px', fontWeight: '600', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px' }}>
           Document Upload & OCR pipeline
@@ -494,23 +508,28 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
                 value={docType}
                 onChange={e => setDocType(e.target.value)}
               >
-                <option value="TENDER">Tender Document (RFP)</option>
-                <option value="VENDOR_PQ">Vendor Pre-Qualification (PQ)</option>
+
+                <option value="PQ_LEGAL_FINANCIAL">Vendor PQ - Legal & Financial Profile</option>
+                <option value="PQ_EXPERIENCE_CERTS">Vendor PQ - Experience & Certifications</option>
                 <option value="VENDOR_TECH">Vendor Technical Proposal</option>
                 <option value="VENDOR_FINANCIAL">Vendor Commercial Quote</option>
                 <option value="GENERAL">General Audit Document</option>
               </select>
             </div>
             <div>
-              <label style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: '600' }}>Vendor ID (Optional)</label>
-              <input 
-                type="number" 
-                placeholder="Leave blank if Tender" 
+              <label style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: '600' }}>Vendor</label>
+              <select 
+                required
                 className="glass-input"
                 style={{ marginTop: '6px' }}
                 value={vendorId}
                 onChange={e => setVendorId(e.target.value)}
-              />
+              >
+                <option value="">-- Select Vendor --</option>
+                {vendors.map(v => (
+                  <option key={v.id} value={v.id}>{v.vendor_name} (ID: {v.id})</option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -565,160 +584,7 @@ export const DocumentWorkspace = ({ activeTenderId }) => {
         )}
       </div>
 
-      {/* Right Pane: OCR Output / Extracted Metadata */}
-      <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px' }}>
-          <h2 style={{ fontSize: '16px', fontWeight: '600' }}>
-            Extracted structured Metadata & Text
-          </h2>
-          {uploadedDoc && !(extracting || uploading) && (
-            <button 
-              className="btn-secondary" 
-              style={{ padding: '6px 12px', fontSize: '12px' }}
-              onClick={handleDownloadMetadataPDF}
-              disabled={downloading}
-            >
-              <FileDown size={14} style={{ marginRight: '6px' }} />
-              {downloading ? 'Generating PDF...' : 'Download PDF'}
-            </button>
-          )}
-        </div>
 
-        {(extracting || uploading || (uploadedDoc && uploadedDoc.status === 'PROCESSING')) && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '16px' }}>
-            <Brain size={36} style={{ color: 'var(--accent-violet)', animation: 'pulse-glow 2s infinite' }} />
-            <div style={{ color: 'var(--text-secondary)', fontWeight: '500' }}>AI Agent is parsing document contents...</div>
-            <div style={{ width: '80%', maxWidth: '300px', marginTop: '16px' }}>
-              <div className="skeleton-line long"></div>
-              <div className="skeleton-line medium"></div>
-              <div className="skeleton-line short"></div>
-              <div className="skeleton-line long" style={{ marginTop: '16px' }}></div>
-              <div className="skeleton-line short"></div>
-            </div>
-          </div>
-        )}
-
-        {!(extracting || uploading || (uploadedDoc && uploadedDoc.status === 'PROCESSING')) && !uploadedDoc && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', textAlign: 'center' }}>
-            Upload a document on the left to see the OCR<br/>transcription and structural AI parsing.
-          </div>
-        )}
-
-        {!(extracting || uploading || (uploadedDoc && uploadedDoc.status === 'PROCESSING')) && uploadedDoc && (() => {
-          const keysToExclude = [
-            'document_id', 'file_name', 'extracted_at', 'processed_at', 
-            'file_size_bytes', 'ocr_method', 'accuracy_estimate', 
-            'total_chars_extracted', 'vector_stored', 'raw_extraction', 
-            'extraction_status'
-          ];
-          
-          const hasVisibleKeys = extractedMeta && Object.entries(extractedMeta).some(([key, value]) => {
-            if (keysToExclude.includes(key)) return false;
-            if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) return false;
-            return true;
-          });
-          
-          const displayMeta = hasVisibleKeys ? extractedMeta : {
-            document_text_summary: uploadedDoc?.ocr_text_preview ? 
-              uploadedDoc.ocr_text_preview : 
-              'No text could be extracted.'
-          };
-
-          return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', flex: 1, paddingRight: '4px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                {Object.entries(displayMeta).map(([key, value]) => {
-                  if (keysToExclude.includes(key)) return null;
-                  if (value === null || value === undefined || value === '') return null;
-
-                  const formatKey = (str) => {
-                    return str
-                      .split('_')
-                      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                      .join(' ');
-                  };
-
-                  let renderedVal = null;
-                  if (Array.isArray(value)) {
-                    renderedVal = (
-                      <ul style={{ margin: '4px 0 0 0', paddingLeft: '20px', listStyleType: 'disc' }}>
-                        {value.map((item, idx) => (
-                          <li key={idx} style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '4px', lineHeight: '1.4' }}>
-                            <StreamText text={item} speed={8} simulate={uploadedDoc?.isNew} />
-                          </li>
-                        ))}
-                      </ul>
-                    );
-                  } else if (typeof value === 'object') {
-                    renderedVal = (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', marginTop: '6px' }}>
-                        {Object.entries(value).map(([subKey, subVal]) => (
-                          <div key={subKey} style={{ background: 'var(--overlay-bg)', padding: '6px 10px', borderRadius: '4px', border: '1px solid var(--card-border)' }}>
-                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>{formatKey(subKey)}</div>
-                            <div style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-primary)', marginTop: '2px' }}>
-                              <StreamText text={String(subVal)} speed={8} simulate={uploadedDoc?.isNew} />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  } else {
-                    const isTextSummary = key === 'document_text_summary';
-                    renderedVal = (
-                      <div 
-                        className={isTextSummary ? "output-stream-card" : ""} 
-                        style={{ 
-                          fontSize: '13px', 
-                          color: 'var(--text-secondary)', 
-                          marginTop: '4px', 
-                          lineHeight: '1.4',
-                          padding: isTextSummary ? '18px' : undefined,
-                          borderRadius: isTextSummary ? '8px' : undefined
-                        }}
-                      >
-                        <StreamText text={formatOcrText(String(value))} speed={8} simulate={uploadedDoc?.isNew} markdown={true} />
-                      </div>
-                    );
-                  }
-
-                  const isTextSummary = key === 'document_text_summary';
-                  const confidence = uploadedDoc.confidence_scores?.[key];
-                  const isLowConfidence = confidence !== undefined && confidence < 0.85;
-                  
-                  const fieldStyle = {
-                     borderBottom: isTextSummary ? 'none' : '1px solid var(--card-border)', 
-                     paddingBottom: '12px',
-                     padding: '8px',
-                     borderRadius: '6px',
-                     backgroundColor: isLowConfidence ? 'rgba(234, 179, 8, 0.15)' : 'transparent',
-                     border: isLowConfidence ? '1px solid rgba(234, 179, 8, 0.4)' : '1px solid transparent',
-                     transition: 'all 0.2s ease',
-                     marginBottom: '8px'
-                  };
-
-                  return (
-                    <div key={key} style={fieldStyle}>
-                      {!isTextSummary && (
-                        <div style={{ fontSize: '13px', color: 'var(--text-primary)', display: 'flex', justifyContent: 'space-between' }}>
-                          <strong>{formatKey(key)}</strong>
-                          {isLowConfidence && <span style={{fontSize: '10px', color: '#ca8a04', fontWeight: 'bold'}}>AI Confidence: {(confidence*100).toFixed(0)}% - Please Review</span>}
-                        </div>
-                      )}
-                      {uploadedDoc.status === 'COMMITTED' || isTextSummary || Array.isArray(value) || typeof value === 'object' ? renderedVal : (
-                         <input 
-                           className="glass-input"
-                           style={{ marginTop: '6px', width: '100%', border: isLowConfidence ? '1px solid #ca8a04' : undefined }}
-                           value={editedMeta[key] || ''}
-                           onChange={(e) => handleMetaChange(key, e.target.value)}
-                         />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })()}</div>
 
       {/* ── OCR Processing History — full-width row ── */}
       <div

@@ -46,7 +46,7 @@ export const TechnicalWorkspace = ({ activeTenderId }) => {
 
   useEffect(() => {
     loadVendors();
-  }, []);
+  }, [activeTenderId]);
 
   useEffect(() => {
     if (activeTenderId) {
@@ -56,12 +56,52 @@ export const TechnicalWorkspace = ({ activeTenderId }) => {
     }
   }, [activeTenderId]);
 
+  useEffect(() => {
+    if (selectedVendorId && activeTenderId) {
+      autoFillTechProposal();
+    }
+  }, [selectedVendorId, activeTenderId]);
+
   async function loadVendors() {
     try {
-      const data = await api.listVendors();
-      setVendors(data);
+      const allVendors = await api.listVendors();
+      if (!activeTenderId) {
+        setVendors([]);
+        return;
+      }
+      
+      // Strict Funnel Logic: Fetch PQ results and only allow PASS
+      const pqResults = await api.getPQResults(activeTenderId).catch(() => []);
+      const passedVendorIds = pqResults
+        .filter(r => r.overall_status === 'PASS')
+        .map(r => r.vendor_id);
+        
+      const qualifiedVendors = allVendors.filter(v => passedVendorIds.includes(v.id));
+      setVendors(qualifiedVendors);
     } catch (err) {
       console.error("Error loading vendors:", err);
+    }
+  }
+
+  async function autoFillTechProposal() {
+    try {
+      const docs = await api.getDocumentHistory(activeTenderId).catch(() => []);
+      const vendorDocs = docs.filter(d => 
+        d.vendor_id === parseInt(selectedVendorId) && 
+        d.document_type === 'VENDOR_TECH'
+      );
+
+      if (vendorDocs.length === 0) {
+        setBidText('');
+        return;
+      }
+
+      const fullDoc = await api.getDocument(vendorDocs[0].id);
+      if (fullDoc && fullDoc.ocr_text_preview) {
+        setBidText(fullDoc.ocr_text_preview);
+      }
+    } catch (err) {
+      console.error("Error auto-filling technical proposal:", err);
     }
   }
 

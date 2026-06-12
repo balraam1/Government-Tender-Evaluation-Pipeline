@@ -48,7 +48,7 @@ export const FinancialWorkspace = ({ activeTenderId }) => {
 
   useEffect(() => {
     loadVendors();
-  }, []);
+  }, [activeTenderId]);
 
   useEffect(() => {
     if (activeTenderId) {
@@ -69,14 +69,26 @@ export const FinancialWorkspace = ({ activeTenderId }) => {
 
   async function loadVendors() {
     try {
-      const data = await api.listVendors();
-      setVendors(data);
+      const allVendors = await api.listVendors();
+      if (!activeTenderId) {
+        setVendors([]);
+        return;
+      }
+      
+      // Strict Funnel Logic: Fetch Tech results and only allow QUALIFIED
+      const techResults = await api.getTechnicalResults(activeTenderId).catch(() => []);
+      const qualifiedVendorIds = techResults
+        .filter(r => r.qualification_status === 'QUALIFIED')
+        .map(r => r.vendor_id);
+        
+      const qualifiedVendors = allVendors.filter(v => qualifiedVendorIds.includes(v.id));
+      setVendors(qualifiedVendors);
     } catch (err) {
       console.error("Error loading vendors:", err);
     }
   }
 
-  const handleAddVendorBid = () => {
+  const handleAddVendorBid = async () => {
     if (!selectedVendorId) return;
     const vendor = vendors.find(v => v.id.toString() === selectedVendorId);
     if (!vendor) return;
@@ -84,10 +96,24 @@ export const FinancialWorkspace = ({ activeTenderId }) => {
     // Check if already added
     if (bids.some(b => b.vendor_id === vendor.id)) return;
 
+    let autoPrice = 0;
+    try {
+      const docs = await api.getDocumentHistory(activeTenderId).catch(() => []);
+      const finDoc = docs.find(d => d.vendor_id === vendor.id && d.document_type === 'VENDOR_FINANCIAL');
+      if (finDoc) {
+        const fullDoc = await api.getDocument(finDoc.id);
+        if (fullDoc && fullDoc.metadata && fullDoc.metadata.quoted_price) {
+          autoPrice = parseFloat(fullDoc.metadata.quoted_price.toString().replace(/[^\d.]/g, '')) || 0;
+        }
+      }
+    } catch (err) {
+      console.error("Error auto-fetching financial price:", err);
+    }
+
     setBids(prev => [...prev, {
       vendor_id: vendor.id,
       vendor_name: vendor.vendor_name,
-      total_amount: 0
+      total_amount: autoPrice
     }]);
     setSelectedVendorId('');
   };
