@@ -85,9 +85,8 @@ function PipelineFunnel({ data }) {
         <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
           {data.map((d, i) => {
             const frac   = d.count / max;
-            const nextFrac = frac;
             const topW   = W * frac;
-            const botW   = W * frac;
+            const botW   = topW * 0.80; // Pinch the bottom of each block to create a funnel aesthetic
             const topX   = (W - topW) / 2;
             const botX   = (W - botW) / 2;
             const y      = i * rowH;
