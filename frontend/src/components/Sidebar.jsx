@@ -1,7 +1,6 @@
 import React from 'react';
 import { 
-  Activity, FileText, MessageSquare, Upload, 
-  ShieldCheck, Award, DollarSign, Lock
+  Activity, FileText, MessageSquare, Play, Lock
 } from 'lucide-react';
 
 export const Sidebar = ({ 
@@ -12,11 +11,7 @@ export const Sidebar = ({
     { id: 'dashboard', label: 'Dashboard', icon: Activity },
     { id: 'rfp', label: 'RFP Authoring', icon: FileText },
     { id: 'prebid', label: 'Pre-Bid Queries', icon: MessageSquare },
-    { id: 'ocr', label: 'Document Extraction', icon: Upload },
-    { id: 'pq', label: 'Pre-Qualification', icon: ShieldCheck },
-    { id: 'tech', label: 'Tech Evaluation', icon: Award },
-    { id: 'financial', label: 'Financial Award', icon: DollarSign },
-    { id: 'recommendation', label: 'Final Recommendation', icon: FileText },
+    { id: 'evaluation', label: 'Start Evaluation', icon: Play },
     { id: 'security-audit', label: 'Security Audit Trail', icon: Lock },
   ];
 

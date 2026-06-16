@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Activity } from 'lucide-react';
+import { Shield, Activity, Download } from 'lucide-react';
 import api from '../services/api';
 
 export const SecurityAuditPage = () => {
@@ -52,13 +52,43 @@ export const SecurityAuditPage = () => {
           </div>
         </div>
 
-        {/* System health badge */}
-        <div
-          className={`badge ${health?.status === 'healthy' ? 'badge-success' : 'badge-danger'}`}
-          style={{ gap: '8px', padding: '6px 14px', marginRight: '40px' }}
-        >
-          <Activity size={14} />
-          SYSTEM: {health?.status?.toUpperCase() || 'OFFLINE'}
+        {/* Export + System health */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginRight: '40px' }}>
+          <button
+            className="btn-primary"
+            style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}
+            disabled={logs.length === 0}
+            onClick={() => {
+              const headers = ['ID', 'Timestamp', 'Action', 'Module', 'User', 'Tender ID', 'Details'];
+              const rows = logs.map(l => [
+                l.id,
+                new Date(l.created_at).toLocaleString(),
+                l.action,
+                l.module,
+                l.user_id,
+                l.tender_id ?? '',
+                l.details ? JSON.stringify(l.details).replace(/,/g, ';') : ''
+              ]);
+              const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `audit_logs_${new Date().toISOString().slice(0, 10)}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            <Download size={14} />
+            Export All Logs
+          </button>
+          <div
+            className={`badge ${health?.status === 'healthy' ? 'badge-success' : 'badge-danger'}`}
+            style={{ gap: '8px', padding: '6px 14px' }}
+          >
+            <Activity size={14} />
+            SYSTEM: {health?.status?.toUpperCase() || 'OFFLINE'}
+          </div>
         </div>
       </div>
 

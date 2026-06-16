@@ -710,4 +710,359 @@ body {
 }
 
 @keyframes spin-anim { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.spin-icon { animation: spin-anim 1s linear infinite; }
+.spin-icon { animation: spin-anim 1s linear infinite; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Start Evaluation Pipeline Styles
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Vendor Selector Button Pills */
+.vendor-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  border: 1.5px solid var(--card-border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+}
+
+.vendor-btn:hover {
+  border-color: var(--accent-violet);
+  color: var(--accent-violet);
+  background: rgba(79, 70, 229, 0.04);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.1);
+}
+
+.vendor-btn.active {
+  background: var(--accent-violet);
+  color: #FFFFFF;
+  border-color: var(--accent-violet);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3);
+  font-weight: 600;
+}
+
+.vendor-btn.pass {
+  border-color: rgba(15, 118, 110, 0.4);
+  color: var(--color-success);
+}
+
+.vendor-btn.pass.active {
+  background: var(--color-success);
+  color: #FFFFFF;
+  border-color: var(--color-success);
+  box-shadow: 0 4px 14px rgba(15, 118, 110, 0.3);
+}
+
+.vendor-btn.fail {
+  border-color: rgba(190, 18, 60, 0.3);
+  color: var(--color-danger);
+  opacity: 0.7;
+}
+
+.vendor-btn.fail.active {
+  background: var(--color-danger);
+  color: #FFFFFF;
+  border-color: var(--color-danger);
+  box-shadow: 0 4px 14px rgba(190, 18, 60, 0.3);
+  opacity: 1;
+}
+
+.vendor-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Pipeline Card */
+.pipeline-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-left: 4px solid var(--accent-violet);
+  border-radius: 12px;
+  padding: 24px;
+  animation: pipeline-slide-in 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.pipeline-card:hover {
+  box-shadow: 0 8px 30px rgba(9, 9, 11, 0.06);
+}
+
+.pipeline-card.stage-docs {
+  border-left-color: #3B82F6;
+}
+
+.pipeline-card.stage-pq {
+  border-left-color: #8B5CF6;
+}
+
+.pipeline-card.stage-tech {
+  border-left-color: #F59E0B;
+}
+
+.pipeline-card.stage-financial {
+  border-left-color: #10B981;
+}
+
+.pipeline-card.stage-final {
+  border-left-color: #EF4444;
+}
+
+@keyframes pipeline-slide-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Pipeline Connector Line */
+.pipeline-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.pipeline-connector-line {
+  width: 2px;
+  height: 32px;
+  background: linear-gradient(to bottom, var(--accent-violet), transparent);
+  border-radius: 1px;
+}
+
+/* Pipeline Step Indicator */
+.pipeline-step-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--overlay-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.pipeline-step-badge.completed {
+  background: rgba(15, 118, 110, 0.08);
+  border-color: rgba(15, 118, 110, 0.25);
+  color: var(--color-success);
+}
+
+.pipeline-step-badge.active {
+  background: rgba(79, 70, 229, 0.08);
+  border-color: rgba(79, 70, 229, 0.3);
+  color: var(--accent-violet);
+  animation: pulse-glow 2s infinite ease-in-out;
+}
+
+/* Document Upload Checklist Grid */
+.doc-checklist-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.doc-checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--overlay-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.doc-checklist-item.uploaded {
+  background: rgba(15, 118, 110, 0.06);
+  border-color: rgba(15, 118, 110, 0.3);
+  color: var(--color-success);
+}
+
+.doc-checklist-item.missing {
+  background: rgba(190, 18, 60, 0.04);
+  border-color: rgba(190, 18, 60, 0.15);
+  color: var(--text-muted);
+}
+
+/* Evaluation History Row */
+.eval-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.eval-history-row:hover {
+  border-color: var(--card-hover-border);
+  box-shadow: 0 4px 12px rgba(9, 9, 11, 0.04);
+}
+
+/* Vendor Buttons Container */
+.vendor-buttons-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 0;
+}
+
+/* Pipeline Progress Stepper */
+.pipeline-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 12px 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  margin: 0 auto 20px auto;
+  width: fit-content;
+}
+
+.pipeline-stepper-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  position: relative;
+}
+
+.pipeline-stepper-step.completed {
+  color: var(--color-success);
+}
+
+.pipeline-stepper-step.active {
+  color: var(--accent-violet);
+  font-weight: 700;
+}
+
+.pipeline-stepper-step::after {
+  content: '';
+  display: block;
+  width: 24px;
+  height: 1px;
+  background: var(--card-border);
+  margin-left: 12px;
+}
+
+.pipeline-stepper-step:last-child::after {
+  display: none;
+}
+
+.pipeline-stepper-step.completed::after {
+  background: var(--color-success);
+}
+
+/* Form section within pipeline cards */
+.pipeline-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 768px) {
+  .pipeline-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .doc-checklist-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Fade in animation for cards appearing */
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-slide-up {
+  animation: fadeSlideUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Markdown Rendered Content Styles */
+.markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 40px !important;
+  font-size: 13px;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid var(--overlay-border);
+  padding: 8px 12px;
+  text-align: left;
+}
+.markdown-body th {
+  background: var(--overlay-bg);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.markdown-body th:nth-child(n+2) {
+  font-weight: 500;
+}
+.markdown-body tr:nth-child(even) {
+  background: rgba(9, 9, 11, 0.01);
+}
+.markdown-body p {
+  margin-bottom: 0.75em;
+}
+.compact-markdown p {
+  margin-bottom: 0.75em !important;
+}
+.markdown-body ul {
+  list-style-type: disc;
+  margin-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+.markdown-body ol {
+  list-style-type: decimal;
+  margin-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+.markdown-body li {
+  margin-bottom: 0.25em;
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.markdown-body strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}

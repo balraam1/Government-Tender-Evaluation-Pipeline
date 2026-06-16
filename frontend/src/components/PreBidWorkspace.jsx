@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Send, MessageSquare, AlertCircle, Eye, X, Plus, FileDown, Loader2 } from 'lucide-react';
+import { Send, MessageSquare, AlertCircle, Eye, X, Plus, FileDown, Loader2, Edit2, Save } from 'lucide-react';
 import html2pdf from 'html2pdf.js';
 import { marked } from 'marked';
 import api from '../services/api';
@@ -18,6 +18,9 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [vendors, setVendors] = useState([]);
   const [downloading, setDownloading] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValues, setEditValues] = useState({ relevant_clause: '', draft_response: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
     if (activeTenderId) {
@@ -87,7 +90,32 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
 
   const handleOpenQueryDetails = (q) => {
     setSelectedQuery(q);
+    setIsEditing(false);
+    setEditValues({ relevant_clause: q.relevant_clause || '', draft_response: q.draft_response || '' });
     setDrawerOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!selectedQuery) return;
+    setSavingEdit(true);
+    try {
+      await api.updatePreBidQuery(selectedQuery.id, {
+        relevant_clause: editValues.relevant_clause,
+        draft_response: editValues.draft_response
+      });
+      const updatedQuery = { 
+        ...selectedQuery, 
+        relevant_clause: editValues.relevant_clause, 
+        draft_response: editValues.draft_response 
+      };
+      setSelectedQuery(updatedQuery);
+      setQueries(queries.map(q => q.id === updatedQuery.id ? updatedQuery : q));
+      setIsEditing(false);
+    } catch (err) {
+      alert(`Failed to save edit: ${err.message}`);
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   async function handleDownloadQueryPDF() {
@@ -259,7 +287,7 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
 
         {/* Right Card: Table Registry List */}
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--card-border)', paddingBottom: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ fontSize: '15px', fontWeight: '700' }}>
               Query Registry Logs
             </h2>
@@ -332,14 +360,38 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
       {/* Slide-out Drawer Panel */}
       <div className={`side-drawer ${drawerOpen ? 'open' : ''}`}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--card-border)', paddingBottom: '14px' }}>
-          <div style={{ flex: 1 }}>
-            <span className="badge badge-info" style={{ fontSize: '9px' }}>Vendor / Bidder Name</span>
-            <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-              <FlowConnector />
-              <div className="output-stream-card" style={{ flex: 1, padding: '10px', borderRadius: '6px', fontSize: '13px', fontWeight: '700' }}>
-                {analyzing ? 'Processing...' : selectedQuery?.vendor_name}
+          <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingRight: '16px' }}>
+            <div>
+              <span className="badge badge-info" style={{ fontSize: '9px' }}>Vendor / Bidder Name</span>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                <FlowConnector />
+                <div className="output-stream-card" style={{ flex: 1, padding: '10px', borderRadius: '6px', fontSize: '13px', fontWeight: '700' }}>
+                  {analyzing ? 'Processing...' : selectedQuery?.vendor_name}
+                </div>
               </div>
             </div>
+            {selectedQuery && !analyzing && (
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {isEditing ? (
+                  <button 
+                    className="btn-primary" 
+                    style={{ padding: '6px 12px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    onClick={handleSaveEdit}
+                    disabled={savingEdit}
+                  >
+                    {savingEdit ? <Loader2 size={12} className="spin" /> : <Save size={12} />} Save
+                  </button>
+                ) : (
+                  <button 
+                    className="btn-secondary" 
+                    style={{ padding: '6px 12px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    onClick={() => setIsEditing(true)}
+                  >
+                    <Edit2 size={12} /> Edit
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           <button 
             onClick={() => setDrawerOpen(false)}
@@ -373,7 +425,15 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
                   <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
                     <FlowConnector />
                     <div className="output-stream-card" style={{ padding: '10px', borderRadius: '6px', flex: 1, fontSize: '12px', lineHeight: '1.4' }}>
-                      <StreamText text={selectedQuery.relevant_clause} speed={10} simulate={selectedQuery.isNew} />
+                      {isEditing ? (
+                        <textarea
+                          style={{ width: '100%', minHeight: '80px', background: 'transparent', border: '1px solid var(--card-border)', color: 'inherit', fontSize: 'inherit', fontFamily: 'inherit', resize: 'vertical', padding: '8px', borderRadius: '4px' }}
+                          value={editValues.relevant_clause}
+                          onChange={(e) => setEditValues({ ...editValues, relevant_clause: e.target.value })}
+                        />
+                      ) : (
+                        <StreamText text={selectedQuery.relevant_clause} speed={10} simulate={selectedQuery.isNew} />
+                      )}
                     </div>
                   </div>
                 </div>
@@ -383,7 +443,15 @@ export const PreBidWorkspace = ({ activeTenderId }) => {
                   <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
                     <FlowConnector />
                     <div className="output-stream-card" style={{ flex: 1, padding: '12px', fontSize: '12px', borderRadius: '6px', lineHeight: '1.4' }}>
-                      <StreamText text={selectedQuery.draft_response} speed={6} simulate={selectedQuery.isNew} />
+                      {isEditing ? (
+                        <textarea
+                          style={{ width: '100%', minHeight: '120px', background: 'transparent', border: '1px solid var(--card-border)', color: 'inherit', fontSize: 'inherit', fontFamily: 'inherit', resize: 'vertical', padding: '8px', borderRadius: '4px' }}
+                          value={editValues.draft_response}
+                          onChange={(e) => setEditValues({ ...editValues, draft_response: e.target.value })}
+                        />
+                      ) : (
+                        <StreamText text={selectedQuery.draft_response} speed={6} simulate={selectedQuery.isNew} />
+                      )}
                     </div>
                   </div>
                 </div>

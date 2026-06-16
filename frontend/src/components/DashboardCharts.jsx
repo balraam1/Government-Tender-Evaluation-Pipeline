@@ -74,59 +74,57 @@ function PipelineFunnel({ data }) {
   if (!hasData) return <EmptyState msg="No vendors have been processed through any evaluation stage yet." />;
 
   const W    = 520;
-  const H    = 240;
-  const max  = data[0]?.count || 1;
+  const H    = 340;
+  const max  = Math.max(...data.map(d => d.count), 1);
   const rowH = H / data.length;
   const STAGE_COLORS = [G_BLUE, '#5E97F6', G_GREEN, G_AMBER, G_RED];
 
   return (
-    <div style={{ width: '100%', overflowX: 'auto' }}>
-      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
-        {data.map((d, i) => {
-          const frac   = d.count / max;
-          const nextFrac = i < data.length - 1 ? data[i + 1].count / max : frac * 0.7;
-          const topW   = W * frac;
-          const botW   = W * nextFrac;
-          const topX   = (W - topW) / 2;
-          const botX   = (W - botW) / 2;
-          const y      = i * rowH;
-          const gap    = 3;
-          const path   = `M${topX},${y + gap} L${topX + topW},${y + gap} L${botX + botW},${y + rowH - gap} L${botX},${y + rowH - gap} Z`;
-          const animTopW = animated ? topW : 0;
-          const animTopX = animated ? topX : W / 2;
-          const animPath = `M${animTopX},${y + gap} L${animTopX + animTopW},${y + gap} L${botX + botW},${y + rowH - gap} L${botX},${y + rowH - gap} Z`;
-          const col    = STAGE_COLORS[i % STAGE_COLORS.length];
+    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <div style={{ width: '100%' }}>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+          {data.map((d, i) => {
+            const frac   = d.count / max;
+            const nextFrac = frac;
+            const topW   = W * frac;
+            const botW   = W * frac;
+            const topX   = (W - topW) / 2;
+            const botX   = (W - botW) / 2;
+            const y      = i * rowH;
+            const gap    = 3;
+            const path   = `M${topX},${y + gap} L${topX + topW},${y + gap} L${botX + botW},${y + rowH - gap} L${botX},${y + rowH - gap} Z`;
+            const animTopW = animated ? topW : 0;
+            const animTopX = animated ? topX : W / 2;
+            const animPath = `M${animTopX},${y + gap} L${animTopX + animTopW},${y + gap} L${botX + botW},${y + rowH - gap} L${botX},${y + rowH - gap} Z`;
+            const col    = STAGE_COLORS[i % STAGE_COLORS.length];
 
-          return (
-            <g key={i}>
-              <path d={animated ? path : animPath} fill={col}
-                opacity={0.88 - i * 0.03}
-                style={{ transition: `d 0.65s cubic-bezier(.4,0,.2,1) ${i * 0.1}s` }}
-              />
-              <text x={W / 2} y={y + rowH / 2 + 5} textAnchor="middle"
-                fill="white" fontSize={11} fontWeight="600" fontFamily="Inter,sans-serif">
-                {d.stage}
-              </text>
-              <text x={W - 8} y={y + rowH / 2 + 5} textAnchor="end"
-                fill="#3C4043" fontSize={13} fontWeight="700" fontFamily="Inter,sans-serif">
-                {d.count}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+            return (
+              <g key={i}>
+                <path d={animated ? path : animPath} fill={col}
+                  opacity={0.88 - i * 0.03}
+                  style={{ transition: `d 0.65s cubic-bezier(.4,0,.2,1) ${i * 0.1}s` }}
+                />
+                <text x={W / 2} y={y + rowH / 2 + 6} textAnchor="middle"
+                  fill="#1e293b" fontSize={14} fontWeight="700" fontFamily="Inter,sans-serif">
+                  {d.stage} — {d.count}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
 
-      {/* Stage-to-stage drop-off */}
-      <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '8px' }}>
-        {data.slice(1).map((d, i) => {
-          const prev     = data[i].count;
-          const dropPct  = prev > 0 ? Math.round(((prev - d.count) / prev) * 100) : 0;
-          return (
-            <div key={i} style={{ textAlign: 'center', fontSize: '10px', color: G_GRAY }}>
-              ↓ {dropPct}% drop
-            </div>
-          );
-        })}
+        {/* Stage-to-stage drop-off */}
+        <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '8px' }}>
+          {data.slice(1).map((d, i) => {
+            const prev     = data[i].count;
+            const dropPct  = prev > 0 ? Math.round(((prev - d.count) / prev) * 100) : 0;
+            return (
+              <div key={i} style={{ textAlign: 'center', fontSize: '10px', color: G_GRAY }}>
+                ↓ {dropPct}% drop
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -154,7 +152,7 @@ function BudgetChart({ data }) {
     : `₹${Math.round(v)}`;
 
   const barH    = 10;
-  const rowH    = 48;
+  const rowH    = 32;
   const labelW  = 120;
   const chartW  = 320;
   const H       = rows.length * rowH + 24;
@@ -372,8 +370,8 @@ function ActivityHeatmap({ data }) {
   const hasAnyActivity = data.length > 0;
 
   const cellW      = 14;
-  const cellH      = 14;
-  const cellGap    = 3;
+  const cellH      = 22;
+  const cellGap    = 5;
   const rowLabelW  = 82;
 
   return (

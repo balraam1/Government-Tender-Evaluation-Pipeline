@@ -3,11 +3,7 @@ import Layout from './components/Layout';
 import AuditDashboard from './components/AuditDashboard';
 import RfpWorkspace from './components/RfpWorkspace';
 import PreBidWorkspace from './components/PreBidWorkspace';
-import DocumentWorkspace from './components/DocumentWorkspace';
-import PqWorkspace from './components/PqWorkspace';
-import TechnicalWorkspace from './components/TechnicalWorkspace';
-import FinancialWorkspace from './components/FinancialWorkspace';
-import RecommendationWorkspace from './components/RecommendationWorkspace';
+import StartEvaluationWorkspace from './components/StartEvaluationWorkspace';
 import SecurityAuditPage from './components/SecurityAuditPage';
 
 function App() {
@@ -39,28 +35,8 @@ function App() {
           activeTenderId={activeTenderId} 
         />
       </div>
-      <div style={{ display: activeModule === 'ocr' ? 'block' : 'none', height: '100%' }}>
-        <DocumentWorkspace 
-          activeTenderId={activeTenderId} 
-        />
-      </div>
-      <div style={{ display: activeModule === 'pq' ? 'block' : 'none', height: '100%' }}>
-        <PqWorkspace 
-          activeTenderId={activeTenderId} 
-        />
-      </div>
-      <div style={{ display: activeModule === 'tech' ? 'block' : 'none', height: '100%' }}>
-        <TechnicalWorkspace 
-          activeTenderId={activeTenderId} 
-        />
-      </div>
-      <div style={{ display: activeModule === 'financial' ? 'block' : 'none', height: '100%' }}>
-        <FinancialWorkspace 
-          activeTenderId={activeTenderId} 
-        />
-      </div>
-      <div style={{ display: activeModule === 'recommendation' ? 'block' : 'none', height: '100%' }}>
-        <RecommendationWorkspace 
+      <div style={{ display: activeModule === 'evaluation' ? 'block' : 'none', height: '100%' }}>
+        <StartEvaluationWorkspace 
           activeTenderId={activeTenderId} 
         />
       </div>

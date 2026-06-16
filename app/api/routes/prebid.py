@@ -10,8 +10,8 @@ import logging
 
 from app.core.database import get_db
 from app.schemas import PreBidQueryRequest, PreBidQueryResponse
-from app.models import PreBidQuery, Tender, AuditLog
-from app.services.ai_service import ai_service
+from app.models import PreBidQuery, Tender, AuditLog, PreBidReport
+from app.services.ai_service import ai_service, AIUnavailableError
 from app.services.vector_service import vector_service
 
 router = APIRouter(prefix="/api/prebid", tags=["Module 2 - Pre-Bid Query Management"])
@@ -65,7 +65,10 @@ Respond in JSON:
   "corrigendum_draft": "Draft corrigendum text if clarification changes the tender (null if not needed)"
 }}"""
 
-    ai_response = await ai_service.generate(prompt, system, max_tokens=1500)
+    try:
+        ai_response = await ai_service.generate(prompt, system, max_tokens=1500)
+    except AIUnavailableError as e:
+        raise HTTPException(status_code=503, detail=f"AI service unavailable. Cannot analyze pre-bid query. {e}")
     parsed = _parse_prebid_response(ai_response, req)
 
     query_obj = PreBidQuery(
@@ -117,6 +120,28 @@ def get_prebid_queries(tender_id: int, db: Session = Depends(get_db)):
         }
         for q in queries
     ]
+
+
+@router.put("/{query_id}", summary="Update a pre-bid query (human-in-the-loop edit)")
+def update_prebid_query(query_id: int, payload: dict, db: Session = Depends(get_db)):
+    query = db.query(PreBidQuery).filter(PreBidQuery.id == query_id).first()
+    if not query:
+        raise HTTPException(status_code=404, detail="Query not found")
+        
+    if "relevant_clause" in payload:
+        query.relevant_clause = payload["relevant_clause"]
+    if "draft_response" in payload:
+        query.draft_response = payload["draft_response"]
+        
+    db.add(AuditLog(
+        tender_id=query.tender_id,
+        user_id="system",
+        action="PREBID_QUERY_EDITED",
+        module="prebid",
+        details={"query_id": query_id, "vendor": query.vendor_name},
+    ))
+    db.commit()
+    return {"status": "success", "message": "Query updated successfully"}
 
 
 def _parse_prebid_response(ai_response: str, req: PreBidQueryRequest) -> dict:
@@ -177,7 +202,7 @@ Ensure the output is well-structured and uses markdown formatting for headers, b
     
     try:
         report_markdown = await ai_service.generate(prompt, system, max_tokens=8192, force_gemini=True)
-        return {
+        report_result = {
             "report": report_markdown,
             "tender": {
                 "tender_number": tender.tender_number,
@@ -190,6 +215,23 @@ Ensure the output is well-structured and uses markdown formatting for headers, b
                 "created_at": tender.created_at.isoformat() if tender.created_at else None
             }
         }
+        # Persist the full AI report to DB
+        db.add(PreBidReport(
+            tender_id=tender_id,
+            report_markdown=report_markdown,
+            query_count=len(queries),
+        ))
+        db.add(AuditLog(
+            tender_id=tender_id,
+            user_id="system",
+            action="PREBID_REPORT_EXPORTED",
+            module="prebid",
+            details={"tender_number": tender.tender_number, "query_count": len(queries)},
+        ))
+        db.commit()
+        return report_result
+    except AIUnavailableError as e:
+        raise HTTPException(status_code=503, detail=f"AI service unavailable. Cannot generate pre-bid report. {e}")
     except Exception as e:
         logger.error(f"Failed to generate pre-bid report: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate AI report")

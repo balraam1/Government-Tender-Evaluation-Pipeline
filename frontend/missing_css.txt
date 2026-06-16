@@ -1,0 +1,153 @@
+.pipeline-card.stage-tech {
+  border-left-color: #F59E0B;
+}
+
+.pipeline-card.stage-financial {
+  border-left-color: #10B981;
+}
+
+.pipeline-card.stage-final {
+  border-left-color: #EF4444;
+}
+
+@keyframes pipeline-slide-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Pipeline Connector Line */
+.pipeline-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.pipeline-connector-line {
+  width: 2px;
+  height: 32px;
+  background: linear-gradient(to bottom, var(--accent-violet), transparent);
+  border-radius: 1px;
+}
+
+/* Pipeline Step Indicator */
+.pipeline-step-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--overlay-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.pipeline-step-badge.completed {
+  background: rgba(15, 118, 110, 0.08);
+  border-color: rgba(15, 118, 110, 0.25);
+  color: var(--color-success);
+}
+
+.pipeline-step-badge.active {
+  background: rgba(79, 70, 229, 0.08);
+  border-color: rgba(79, 70, 229, 0.3);
+  color: var(--accent-violet);
+  animation: pulse-glow 2s infinite ease-in-out;
+}
+
+/* Document Upload Checklist Grid */
+.doc-checklist-grid {
+  display: grid;
+  grid-template-column
+}
+
+.pipeline-stepper-step.completed {
+  color: var(--color-success);
+}
+
+.pipeline-stepper-step.active {
+  color: var(--accent-violet);
+  font-weight: 700;
+}
+
+.pipeline-stepper-step::after {
+  content: '';
+  display: block;
+  width: 24px;
+  height: 1px;
+  background: var(--card-border);
+  margin-left: 12px;
+}
+
+.pipeline-stepper-step:last-child::after {
+  display: none;
+}
+
+.pipeline-stepper-step.completed::after {
+  background: var(--color-success);
+}
+
+/* Form section within pipeline cards */
+.pipeline-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+@media (max-width: 768px) {
+  .pipeline-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .doc-checklist-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Fade in animation for cards appearing */
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-slide-up {
+  animation: fadeSlideUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Markdown Rendered Content Styles */
+.markdown-body p {
+  margin-bottom: 0.75em;
+}
+.markdown-body ul {
+  list-style-type: disc;
+  margin-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+.markdown-body ol {
+  list-style-type: decimal;
+  margin-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+.markdown-body li {
+  margin-bottom: 0.25em;
+}
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.markdown-body strong {
+  font-weight: 600;
+  color: var(--text-primary);

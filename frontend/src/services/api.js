@@ -34,6 +34,7 @@ export const api = {
   // Pre-Bid Queries
   getPreBidQueries: (tenderId) => request(`/prebid/${tenderId}/queries`),
   analyzePreBidQuery: (data) => request('/prebid/analyze', { method: 'POST', body: data }),
+  updatePreBidQuery: (id, data) => request(`/prebid/${id}`, { method: 'PUT', body: data }),
   generatePreBidReport: (tenderId) => request(`/prebid/${tenderId}/export_report`, { method: 'POST' }),
 
   // Document Processing
@@ -63,6 +64,7 @@ export const api = {
 
   // Final Recommendation
   generateRecommendation: (tenderId) => request('/recommendation/generate', { method: 'POST', body: { tender_id: tenderId } }),
+  getRecommendationHistory: (tenderId) => request(`/recommendation/${tenderId}/history`),
 
   // Vendors
   registerVendor: (data) => request('/vendor/register', { method: 'POST', body: data }),
@@ -72,7 +74,7 @@ export const api = {
   // Audit Trails
   getAuditLogs: (tenderId, module) => {
     let query = '';
-    const params = [];
+    const params = ['limit=1000000'];
     if (tenderId) params.push(`tender_id=${tenderId}`);
     if (module) params.push(`module=${module}`);
     if (params.length > 0) query = `?${params.join('&')}`;

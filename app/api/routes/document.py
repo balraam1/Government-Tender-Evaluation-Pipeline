@@ -23,7 +23,7 @@ from app.core.config import settings
 from app.models import Document, Tender, AuditLog
 from app.services.ocr_service import ocr_service
 from app.services.vector_service import vector_service
-from app.services.ai_service import ai_service
+from app.services.ai_service import ai_service, AIUnavailableError
 
 router = APIRouter(prefix="/api/document", tags=["Module 3 & 4 - Document Processing"])
 logger = logging.getLogger(__name__)
@@ -174,7 +174,19 @@ async def _background_ocr_task(doc_id: int, file_path: str, ext: str, document_t
         doc.ocr_accuracy = ocr_result.get("accuracy_estimate", 0.0)
         doc.confidence_scores = confidence_scores
         doc.status = "PENDING_REVIEW"
-        
+        db.add(AuditLog(
+            tender_id=doc.tender_id,
+            user_id="system",
+            action="OCR_COMPLETED",
+            module="document",
+            details={
+                "doc_id": doc_id,
+                "file_name": doc.file_name,
+                "ocr_method": doc.ocr_method,
+                "text_length": len(extracted_text),
+                "accuracy": round(doc.ocr_accuracy * 100, 1)
+            },
+        ))
         db.commit()
         logger.info(f"Background OCR completed for document {doc_id}")
     except Exception as e:
@@ -182,6 +194,13 @@ async def _background_ocr_task(doc_id: int, file_path: str, ext: str, document_t
         doc = db.query(Document).filter(Document.id == doc_id).first()
         if doc:
             doc.status = "FAILED"
+            db.add(AuditLog(
+                tender_id=doc.tender_id,
+                user_id="system",
+                action="OCR_FAILED",
+                module="document",
+                details={"doc_id": doc_id, "file_name": doc.file_name, "error": str(e)[:300]},
+            ))
             db.commit()
     finally:
         db.close()
@@ -213,7 +232,17 @@ def update_document_metadata(doc_id: int, payload: dict, db: Session = Depends(g
     for k in payload.get("metadata", {}).keys():
         updated_confidence[k] = 1.0
     doc.confidence_scores = updated_confidence
-    
+    db.add(AuditLog(
+        tender_id=doc.tender_id,
+        user_id="system",
+        action="DOCUMENT_METADATA_EDITED",
+        module="document",
+        details={
+            "doc_id": doc_id,
+            "file_name": doc.file_name,
+            "fields_edited": list(payload.get("metadata", {}).keys()),
+        },
+    ))
     db.commit()
     return {"status": "success", "message": "Draft saved"}
 
@@ -441,7 +470,25 @@ Return ONLY valid JSON (no markdown fences, no explanation). If a field is not f
   "quoted_price": "Numeric extracted INR total amount (e.g., 531000000) or null",
   "base_price": "Numeric extracted INR base amount or null",
   "tax_amount": "Numeric extracted tax amount or null",
-  "currency": "Currency type (e.g. INR) or null"
+  "currency": "Currency type (e.g. INR) or null",
+  "payment_terms": "Extracted payment milestones or terms or null",
+  "warranty_period": "Extracted warranty in months or years or null",
+  "amc_cost": "Extracted Annual Maintenance Contract cost or null"
+}}"""
+    elif doc_type == "VENDOR_TECH":
+        prompt = f"""Extract technical proposal metadata from this vendor document:
+---
+{text[:4000]}
+---
+
+Return ONLY valid JSON (no markdown fences, no explanation). If a field is not found anywhere in the document, return null for that field:
+{{
+  "solution_summary": "Brief 1-2 sentence summary of proposed solution architecture or null",
+  "team_size": "Extracted team size (e.g. '15 members') or null",
+  "timeline": "Implementation timeline (e.g. '6 months') or null",
+  "key_personnel": "Names/roles of key personnel or null",
+  "sla_level": "SLA commitment level (e.g. Basic, Standard, Premium) or null",
+  "deployment_model": "Deployment model (e.g. On-Premise, Cloud, Hybrid) or null"
 }}"""
     else:
         # Fallback generic vendor prompt
@@ -458,7 +505,11 @@ Return ONLY valid JSON (no markdown fences, no explanation):
   "important_dates": ["date 1", "date 2"]
 }}"""
 
-    response = await ai_service.generate(prompt, system, max_tokens=1000)
+    try:
+        response = await ai_service.generate(prompt, system, max_tokens=2500)
+    except AIUnavailableError as e:
+        logger.error(f"AI unavailable during metadata extraction: {e}")
+        return {"extraction_status": "ai_unavailable", "error": str(e)}
     try:
         start = response.find("{")
         end = response.rfind("}") + 1

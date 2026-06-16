@@ -16,8 +16,8 @@ from app.schemas import (
     FinancialEvaluationRequest, FinancialEvaluationResponse,
     RecommendationRequest, RecommendationResponse,
 )
-from app.models import FinancialEvaluation, PQEvaluation, TechnicalEvaluation, Tender, AuditLog, Vendor
-from app.services.ai_service import ai_service
+from app.models import FinancialEvaluation, PQEvaluation, TechnicalEvaluation, Tender, AuditLog, Vendor, Recommendation, ShortfallRecord, FinancialReport
+from app.services.ai_service import ai_service, AIUnavailableError
 
 # Router for Shortfall (Module 7)
 shortfall_router = APIRouter(prefix="/api/shortfall", tags=["Module 7 - Shortfall Detection"])
@@ -88,6 +88,15 @@ async def analyze_shortfall(req: ShortfallRequest, db: Session = Depends(get_db)
         req.tender_id, req.vendor_id, missing_docs, missing_clauses, missing_certs, db
     )
 
+    # Persist the shortfall record and letter
+    db.add(ShortfallRecord(
+        tender_id=req.tender_id,
+        vendor_id=req.vendor_id,
+        missing_documents=missing_docs,
+        missing_clauses=missing_clauses,
+        missing_certifications=missing_certs,
+        clarification_letter=clarification,
+    ))
     db.add(AuditLog(
         tender_id=req.tender_id,
         user_id="system",
@@ -138,22 +147,11 @@ Write a professional government procurement letter requesting the vendor to subm
 
     try:
         return await ai_service.generate(prompt, max_tokens=500)
-    except Exception:
-        items = missing_docs + missing_clauses + missing_certs
-        return f"""CLARIFICATION REQUEST
-
-Ref: {tender_number}
-
-Dear Vendor,
-
-Your bid submission for "{tender_title}" is deficient in the following:
-
-{chr(10).join(f"  {i+1}. {item}" for i, item in enumerate(items))}
-
-You are requested to submit the above-mentioned items within 48 hours of receipt of this communication. 
-Failure to comply may result in rejection of your bid.
-
-Issued by: MPSEDC Evaluation Committee"""
+    except AIUnavailableError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"AI service unavailable. Cannot generate clarification letter. {e}"
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -213,7 +211,22 @@ async def evaluate_financial(req: FinancialEvaluationRequest, db: Session = Depe
     db.commit()
 
     l1 = rankings[0] if rankings else {}
-    report = await _generate_financial_report(req.tender_id, rankings, db)
+
+    # Generate and persist AI report — non-fatal if AI is unavailable
+    report = ""
+    try:
+        report = await _generate_financial_report(req.tender_id, rankings, db)
+        db.add(FinancialReport(
+            tender_id=req.tender_id,
+            report_text=report,
+            l1_vendor_name=l1.get("vendor_name", "N/A"),
+            l1_amount=float(l1.get("total_amount", 0)),
+            total_bids=len(req.bids),
+        ))
+        db.commit()
+    except AIUnavailableError as e:
+        logger.error(f"AI unavailable for financial report generation: {e}. Rankings saved, report skipped.")
+        report = ""
 
     return FinancialEvaluationResponse(
         tender_id=req.tender_id,
@@ -244,25 +257,10 @@ def get_financial_results(tender_id: int, db: Session = Depends(get_db)):
 
 async def _generate_financial_report(tender_id: int, rankings: list, db: Session) -> str:
     tender = db.query(Tender).filter(Tender.id == tender_id).first()
-    try:
-        prompt = f"""Generate a formal financial evaluation report for tender {tender.tender_number if tender else tender_id}.
+    prompt = f"""Generate a formal financial evaluation report for tender {tender.tender_number if tender else tender_id}.
 Rankings: {json.dumps(rankings[:5], indent=2)}
 Write a professional 3-4 paragraph evaluation report recommending L1 vendor."""
-        return await ai_service.generate(prompt, max_tokens=400)
-    except Exception:
-        l1 = rankings[0] if rankings else {}
-        return f"""<div style="text-align: center; font-weight: bold; margin-bottom: 12px;">FINANCIAL EVALUATION REPORT</div>
-
-Tender: {tender.title if tender else f'ID {tender_id}'}
-
-Total bids received: {len(rankings)}
-
-**Financial Ranking Summary:**
-{chr(10).join(f"  {r['label']}: {r['vendor_name']} - INR {r['total_amount']:,.0f}" for r in rankings[:5])}
-
-The lowest (L1) bid is from {l1.get('vendor_name', 'N/A')} at INR {l1.get('total_amount', 0):,.0f}.
-
-The Evaluation Committee recommends award to {l1.get('vendor_name', 'N/A')} being the L1 bidder, subject to compliance with all other terms and conditions."""
+    return await ai_service.generate(prompt, max_tokens=400)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -348,12 +346,23 @@ async def generate_recommendation(req: RecommendationRequest, db: Session = Depe
         float(x["quoted_price"]) if x["quoted_price"] else float('inf')
     ))
 
+    new_rec = Recommendation(
+        tender_id=req.tender_id,
+        recommended_vendor_id=recommended_eval.vendor_id,
+        award_report=award_report,
+        bidders_summary=bidders_summary,
+        risk_assessment=risk_assessment
+    )
+    db.add(new_rec)
+    db.commit()
+    db.refresh(new_rec)
+
     db.add(AuditLog(
         tender_id=req.tender_id,
         user_id="system",
         action="RECOMMENDATION_GENERATED",
         module="recommendation",
-        details={"recommended_vendor_id": recommended_eval.vendor_id, "financial_rank": recommended_eval.ranking_label},
+        details={"recommended_vendor_id": recommended_eval.vendor_id, "financial_rank": recommended_eval.ranking_label, "recommendation_id": new_rec.id},
     ))
     db.commit()
 
@@ -370,7 +379,7 @@ async def generate_recommendation(req: RecommendationRequest, db: Session = Depe
         tender_details=tender_details,
         bidders_summary=bidders_summary,
         risk_assessment=risk_assessment,
-        generated_at=datetime.utcnow(),
+        generated_at=new_rec.created_at,
     )
 
 
@@ -390,7 +399,7 @@ Return your response exactly in this JSON format:
   "report": "the award report text",
   "risk": "the risk assessment text"
 }}"""
-        resp = await ai_service.generate(prompt, max_tokens=600)
+        resp = await ai_service.generate(prompt, max_tokens=1500)
         
         # Try to parse JSON
         try:
@@ -406,33 +415,37 @@ Return your response exactly in this JSON format:
             parsed = json.loads(clean_resp.strip())
             return parsed.get("report", ""), parsed.get("risk", "")
         except json.JSONDecodeError:
-            # Fallback if AI didn't return JSON
-            return resp, "Risk assessment could not be generated cleanly."
-            
-    except Exception:
-        fallback_report = f"""AWARD RECOMMENDATION REPORT
+            # AI returned valid text but not clean JSON — use raw response
+            import re
+            match = re.search(r'"report"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)', resp)
+            if match:
+                return match.group(1).replace('\\n', '\n'), "Risk assessment could not be separated from report."
+            return resp.replace('{', '').replace('}', '').replace('"report":', '').replace('"', '').strip(), "Risk assessment could not be separated from report."
 
-Tender: {tender.title}
-Tender No: {tender.tender_number}
-Date: {datetime.now().strftime('%d %B %Y')}
+    except AIUnavailableError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"AI service unavailable. Cannot generate BER award report. {e}"
+        )
 
-BASIS OF RECOMMENDATION:
-This report is prepared based on the evaluation of bids received against the above tender 
-following a three-stage evaluation process: Pre-Qualification, Technical Demonstration, 
-and Financial Evaluation.
-
-EVALUATION SUMMARY:
-- Pre-Qualification: Vendor {fin_eval.vendor_id} qualified all PQ criteria
-- Technical Evaluation: Score {tech_score}/100 - QUALIFIED
-- Financial Evaluation: Ranked {fin_eval.ranking_label} at INR {fin_eval.quoted_price:,.0f}
-
-RECOMMATION:
-The Evaluation Committee recommends award of the contract to Vendor ID {fin_eval.vendor_id} 
-at INR {fin_eval.quoted_price:,.0f} (exclusive of GST), being the L1 qualified bidder 
-meeting all technical and PQ requirements.
-
-The selected vendor shall sign the agreement within 15 days of receipt of Letter of Intent.
-
-Chief General Manager, MPSEDC"""
-        fallback_risk = "No significant compliance deviations detected based on automated metrics. Vendor fulfills all criteria."
-        return fallback_report, fallback_risk
+@recommendation_router.get("/{tender_id}/history", summary="Get recommendation history for a tender")
+def get_recommendation_history(tender_id: int, db: Session = Depends(get_db)):
+    recs = db.query(Recommendation).filter(Recommendation.tender_id == tender_id).order_by(Recommendation.created_at.desc()).all()
+    history = []
+    for r in recs:
+        vname = "N/A"
+        if r.recommended_vendor_id:
+            vendor = db.query(Vendor).filter(Vendor.id == r.recommended_vendor_id).first()
+            if vendor:
+                vname = vendor.vendor_name
+        history.append({
+            "id": r.id,
+            "tender_id": r.tender_id,
+            "recommended_vendor_id": r.recommended_vendor_id,
+            "recommended_vendor_name": vname,
+            "award_report": r.award_report,
+            "bidders_summary": r.bidders_summary,
+            "risk_assessment": r.risk_assessment,
+            "created_at": r.created_at
+        })
+    return history

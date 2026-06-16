@@ -14,7 +14,7 @@ import logging
 from app.core.database import get_db
 from app.schemas import RFPGenerateRequest, RFPGenerateResponse, TenderResponse, RFPUpdateRequest
 from app.models import Tender, TenderStatus, AuditLog
-from app.services.ai_service import ai_service
+from app.services.ai_service import ai_service, AIUnavailableError
 from app.services.vector_service import vector_service
 
 router = APIRouter(prefix="/api/rfp", tags=["Module 1 - RFP Generation"])
@@ -73,7 +73,13 @@ async def generate_rfp(req: RFPGenerateRequest, db: Session = Depends(get_db)):
     
     # Generate AI content
     system, prompt = _build_rfp_prompt(req)
-    ai_response = await ai_service.generate(prompt, system)
+    try:
+        ai_response = await ai_service.generate(prompt, system)
+    except AIUnavailableError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"AI service unavailable. Cannot generate RFP. Please ensure Ollama is running or Gemini API key is configured. {e}"
+        )
     
     # Parse AI response
     sections = _parse_rfp_sections(ai_response, req)

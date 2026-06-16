@@ -175,6 +175,21 @@ class FinancialEvaluation(Base):
     vendor = relationship("Vendor", back_populates="financial_evaluations")
 
 
+class Recommendation(Base):
+    __tablename__ = "recommendations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tender_id = Column(Integer, ForeignKey("tenders.id"))
+    recommended_vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=True)
+    award_report = Column(Text)
+    bidders_summary = Column(JSON)
+    risk_assessment = Column(JSON)
+    created_at = Column(DateTime, default=func.now())
+
+    tender = relationship("Tender")
+    recommended_vendor = relationship("Vendor")
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
@@ -186,3 +201,49 @@ class AuditLog(Base):
     details = Column(JSON)
     ip_address = Column(String(50))
     created_at = Column(DateTime, default=func.now())
+
+
+class ShortfallRecord(Base):
+    """Stores AI-generated shortfall clarification letter for each vendor/tender analysis."""
+    __tablename__ = "shortfall_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tender_id = Column(Integer, ForeignKey("tenders.id"), nullable=True)
+    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=True)
+    missing_documents = Column(JSON)
+    missing_clauses = Column(JSON)
+    missing_certifications = Column(JSON)
+    clarification_letter = Column(Text)   # Full AI-generated letter text
+    created_at = Column(DateTime, default=func.now())
+
+    tender = relationship("Tender")
+    vendor = relationship("Vendor")
+
+
+class FinancialReport(Base):
+    """Stores the AI-generated financial evaluation report paragraph per tender."""
+    __tablename__ = "financial_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tender_id = Column(Integer, ForeignKey("tenders.id"), nullable=False)
+    report_text = Column(Text)            # Full AI-generated report
+    l1_vendor_name = Column(String(300))
+    l1_amount = Column(Float)
+    total_bids = Column(Integer)
+    created_at = Column(DateTime, default=func.now())
+
+    tender = relationship("Tender")
+
+
+class PreBidReport(Base):
+    """Stores the AI-generated comprehensive pre-bid queries export report per tender."""
+    __tablename__ = "prebid_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tender_id = Column(Integer, ForeignKey("tenders.id"), nullable=False)
+    report_markdown = Column(Text)        # Full AI Markdown report
+    query_count = Column(Integer)
+    created_at = Column(DateTime, default=func.now())
+
+    tender = relationship("Tender")
+

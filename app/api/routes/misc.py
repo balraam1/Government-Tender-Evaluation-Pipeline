@@ -105,6 +105,14 @@ def register_vendor(payload: dict, db: Session = Depends(get_db)):
     db.add(vendor)
     db.commit()
     db.refresh(vendor)
+    db.add(AuditLog(
+        tender_id=None,
+        user_id="system",
+        action="VENDOR_REGISTERED",
+        module="vendor",
+        details={"vendor_id": vendor.id, "vendor_name": vendor.vendor_name},
+    ))
+    db.commit()
     return {"vendor_id": vendor.id, "vendor_name": vendor.vendor_name, "created_at": vendor.created_at}
 
 

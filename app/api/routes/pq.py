@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.schemas import PQEvaluationRequest, PQEvaluationResponse
 from app.models import PQEvaluation, Vendor, Tender, AuditLog
-from app.services.ai_service import ai_service
+from app.services.ai_service import ai_service, AIUnavailableError
 
 router = APIRouter(prefix="/api/pq", tags=["Module 5 - PQ Evaluation"])
 logger = logging.getLogger(__name__)
@@ -187,16 +187,13 @@ def _run_pq_checks(req: PQEvaluationRequest) -> dict:
 
 
 async def _get_ai_pq_remarks(req: PQEvaluationRequest, results: dict, overall: str) -> str:
-    prompt = f"""Generate a professional PQ evaluation remark for:
+    prompt = f"""Generate a short PQ evaluation remark for:
 Overall Status: {overall}
-Checks: {json.dumps(results['checks'], indent=2)[:1000]}
+Failed Checks: {[c['criterion'] for c in results['checks'] if c['status'] == 'FAIL']}
 
-Write 2-3 sentences summarizing the evaluation outcome professionally."""
-    try:
-        return await ai_service.generate(prompt, max_tokens=200)
-    except Exception:
-        if overall == "PASS":
-            return "Vendor meets all pre-qualification criteria. Eligible for technical evaluation stage."
-        else:
-            fails = [c["criterion"] for c in results["checks"] if c["status"] == "FAIL"]
-            return f"Vendor does not meet PQ criteria for: {', '.join(fails)}. Not eligible for further evaluation."
+Write exactly 2 sentences. The first sentence must state if they passed or failed. The second sentence must briefly explain why. Do not use more than 30 words total."""
+    res = await ai_service.generate(prompt, max_tokens=2048)
+    # Catch hallucinated EOS or abruptly truncated Ollama glitch responses
+    if len(res.strip()) < 15 or res.strip().endswith("-"):
+        raise AIUnavailableError("AI returned a truncated or invalid PQ remark response")
+    return res

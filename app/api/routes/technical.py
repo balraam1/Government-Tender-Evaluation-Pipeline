@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.schemas import TechnicalEvaluationRequest, TechnicalEvaluationResponse
 from app.models import TechnicalEvaluation, Document, AuditLog
-from app.services.ai_service import ai_service
+from app.services.ai_service import ai_service, AIUnavailableError
 
 router = APIRouter(prefix="/api/technical", tags=["Module 6 - Technical Evaluation"])
 logger = logging.getLogger(__name__)
@@ -87,7 +87,13 @@ async def evaluate_technical(req: TechnicalEvaluationRequest, db: Session = Depe
 
     max_score = sum(p["max_score"] for p in TECH_PARAMETERS)
     percentage = (total_score / max_score) * 100
-    qualification = "QUALIFIED" if percentage >= 70 else "NOT_QUALIFIED"
+    
+    # Qualification Rule: Must score >= 70% AND must not fail any single parameter
+    has_failed_param = any(row["compliance"] == "NON_COMPLIANT" for row in compliance_matrix)
+    if percentage >= 70 and not has_failed_param:
+        qualification = "QUALIFIED"
+    else:
+        qualification = "NOT_QUALIFIED"
 
     # Save evaluation
     tech_eval = TechnicalEvaluation(
@@ -182,4 +188,5 @@ Return JSON:
             return json.loads(response[start:end])
     except Exception:
         pass
-    return {"parameters": {}, "overall_remarks": "Technical evaluation completed via AI analysis"}
+    # AI returned text but not valid JSON — return raw response in remarks
+    return {"parameters": {}, "overall_remarks": response.strip() or "Technical evaluation completed. Could not parse structured scores."}
