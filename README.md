@@ -1,6 +1,6 @@
-# MPSEDC GenAI Procurement Platform
+# GenAI Procurement Platform
 
-**RFP No: MPSEDC/COE/2026/682**  
+  
 Generative AI–Enabled Procurement Solution for Bid Preparation and Evaluation
 
 ---
